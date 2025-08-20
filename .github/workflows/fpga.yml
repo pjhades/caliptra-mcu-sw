@@ -5,6 +5,8 @@ name: FPGA Tests
 on:
   pull_request:
   workflow_dispatch:
+  push:
+    branches: ["clundin/fpga-staging"]
 jobs:
   build_test_binaries:
     runs-on: [e2-standard-8]
@@ -168,7 +170,7 @@ jobs:
           retention-days: 1
 
   test_artifacts:
-    runs-on: vck190-mcu
+    runs-on: vck190-mcu-staging
     needs: build_test_binaries
     timeout-minutes: 120
 
