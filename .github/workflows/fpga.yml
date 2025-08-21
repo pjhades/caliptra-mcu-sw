@@ -5,6 +5,8 @@ name: FPGA Tests
 on:
   pull_request:
   workflow_dispatch:
+  push: 
+    branches: "xtask-fpga-ci"
 jobs:
   build_test_binaries:
     runs-on: [e2-standard-8]
@@ -128,36 +130,32 @@ jobs:
           export X86_64_UNKNOWN_LINUX_GNU_OPENSSL_DIR=/tmp/openssl/native
           export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_DIR=/tmp/openssl/arm
 
-          # Cross compile for the ARM core
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="aarch64-linux-gnu-gcc"
-
           # Build ROM and runtime binaries
           echo "Cross compiling FPGA binaries"
-          cargo xtask-fpga all-build --platform fpga
+          cargo xtask-fpga fpga build
           sccache --show-stats
 
           mkdir -p /tmp/caliptra-binaries
           tar -cvz -f /tmp/caliptra-binaries/caliptra-binaries.tar.gz \
-            target/all-fw.zip
+            all-fw.zip
 
           echo "Cross compiling test binaries"
-          FEATURES="fpga_realtime"
-          cargo nextest archive \
-            --features=${FEATURES} \
-            --release \
-            --target=aarch64-unknown-linux-gnu \
-            --archive-file=/tmp/caliptra-test-binaries.tar.zst
+          cargo xtask-fpga fpga build-test
           sccache --show-stats
 
-          mkdir /tmp/caliptra-test-binaries/
-          tar xvf /tmp/caliptra-test-binaries.tar.zst -C /tmp/caliptra-test-binaries/
-          mksquashfs /tmp/caliptra-test-binaries /tmp/caliptra-test-binaries.sqsh -comp zstd
+          mv caliptra-test-binaries.tar.zst /tmp/caliptra-test-binaries.tar.zst
+
+          echo "Cross compile xtask"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="aarch64-linux-gnu-gcc"
+          cargo b -p xtask --features model_realtime --target aarch64-unknown-linux-gnu
+          mkdir /tmp/xtask
+          mv target/debug/aarch64-unknown-linux-gnu/xtask /tmp/xtask/xtask
 
       - name: 'Upload test binaries artifact'
         uses: actions/upload-artifact@v4
         with:
           name: caliptra-test-binaries${{ inputs.artifact-suffix }}
-          path: /tmp/caliptra-test-binaries.sqsh
+          path: /tmp/caliptra-test-binaries.tar.zst
           retention-days: 1
 
       - name: 'Upload test firmware artifact'
@@ -165,6 +163,13 @@ jobs:
         with:
           name: caliptra-test-firmware${{ inputs.artifact-suffix }}
           path: /tmp/caliptra-binaries
+          retention-days: 1
+
+      - name: 'Upload xtask artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xtask${{ inputs.artifact-suffix }}
+          path: /tmp/xtask
           retention-days: 1
 
   test_artifacts:
@@ -182,7 +187,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: caliptra-test-binaries${{ inputs.artifact-suffix }}
-          path: /tmp/caliptra-test-binaries.sqsh
+          path: /tmp/caliptra-test-binaries.tar.zst
 
       - name: 'Download Test Firmware Artifact'
         uses: actions/download-artifact@v4
@@ -190,38 +195,19 @@ jobs:
           name: caliptra-test-firmware${{ inputs.artifact-suffix }}
           path: /tmp/caliptra-binaries
 
-      - name: Mount binaries
-        run: |
-          tar -xvf /tmp/caliptra-binaries/caliptra-binaries.tar.gz
-
-          sudo mkdir /tmp/caliptra-test-binaries
-          echo mount squashfs
-          sudo mount /tmp/caliptra-test-binaries.sqsh/caliptra-test-binaries.sqsh /tmp/caliptra-test-binaries -t squashfs -o loop
-          find /tmp/caliptra-test-binaries
+      - name: 'Download xtask'
+        uses: actions/download-artifact@v4
+        with:
+          name: xtask${{ inputs.artifact-suffix }}
+          path: /tmp/xtask
 
       - name: Execute tests
         run: |
           export RUST_BACKTRACE=1
           export RUST_TEST_THREADS=1
-          TEST_BIN=/tmp/caliptra-test-binaries
-
-          COMMON_ARGS=(
-              --cargo-metadata="${TEST_BIN}/target/nextest/cargo-metadata.json"
-              --binaries-metadata="${TEST_BIN}/target/nextest/binaries-metadata.json"
-              --target-dir-remap="${TEST_BIN}/target"
-              --workspace-remap=.
-              -E 'package(mcu-hw-model) - test(model_emulated::test::test_new_unbooted)' # Modify this as we onboard crates to the FPGA test suite.
-          )
-
-          cargo-nextest nextest list \
-              "${COMMON_ARGS[@]}" \
-              --message-format json > /tmp/nextest-list.json
-
-          sudo CPTRA_FIRMWARE_BUNDLE="${PWD}/target/all-fw.zip" cargo-nextest nextest run \
-              "${COMMON_ARGS[@]}" \
-              --test-threads=${RUST_TEST_THREADS} \
-              --no-fail-fast \
-              --profile=nightly
+          ls /tmp
+          ls /tmp/xtask
+          sudo /tmp/xtask/xtask-fpga test
 
       - name: 'Upload test results'
         uses: actions/upload-artifact@v4
@@ -230,4 +216,3 @@ jobs:
           name: caliptra-test-results${{ inputs.artifact-suffix }}
           path: |
             /tmp/junit.xml
-            /tmp/nextest-list.json
