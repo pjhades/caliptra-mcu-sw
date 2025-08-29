@@ -431,7 +431,7 @@ fn reg_access_test() {
                     binaries.vendor_pk_hash().unwrap().chunks(4).enumerate().for_each(|(i, chunk)| {
                         let mut array = [0u8; 4];
                         array.copy_from_slice(chunk);
-                        vendor_pk_hash[i] = u32::from_le_bytes(array);
+                        vendor_pk_hash[i] = u32::from_be_bytes(array);
                     });
                     vendor_pk_hash
                 },
