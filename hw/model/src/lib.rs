@@ -417,12 +417,17 @@ fn reg_access_test() {
             mcu_rom: &binaries.mcu_rom,
             vendor_pk_hash: binaries.vendor_pk_hash(),
             active_mode: true,
+            vendor_pqc_type: Some(FwVerificationPqcKeyType::LMS),
             ..Default::default()
         },
         BootParams {
             fw_image: Some(&binaries.caliptra_fw),
             soc_manifest: Some(&binaries.soc_manifest),
             mcu_fw_image: Some(&binaries.mcu_runtime),
+            fuses: Fuses {
+                fuse_pqc_key_type: FwVerificationPqcKeyType::LMS as u32,
+                ..Default::default()
+            },
             ..Default::default()
         },
     )
