@@ -165,7 +165,6 @@ pub fn all_build(args: AllBuildArgs) -> Result<()> {
         dccm_size,
         None,
         None,
-        false,
     )?;
 
     let fpga = platform == "fpga";

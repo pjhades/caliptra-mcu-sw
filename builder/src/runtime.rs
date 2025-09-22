@@ -303,7 +303,6 @@ pub fn runtime_build_with_apps_cached(
     dccm_size: Option<u32>,
     log_flash_config: Option<&LoggingFlashConfig>,
     mcu_image_header: Option<&[u8]>,
-    use_cache: bool,
 ) -> Result<String> {
     let memory_map = memory_map.unwrap_or(&mcu_config_emulator::EMULATOR_MEMORY_MAP);
     let mut app_offset = memory_map.sram_offset as usize;
@@ -311,14 +310,11 @@ pub fn runtime_build_with_apps_cached(
     let runtime_bin = target_binary(output_name);
 
     let platform = platform.unwrap_or(DEFAULT_PLATFORM);
-    let mut cached_values = if use_cache {
-        let vals = read_cached_values(platform);
-        println!("Read cached values for platform {}: {:?}", platform, vals);
-        vals
-    } else {
-        println!("Bypassing cached values for platform {}", platform);
-        CachedValues::default()
-    };
+    let mut cached_values = read_cached_values(platform);
+    println!(
+        "Read cached values for platform {}: {:?}",
+        platform, cached_values
+    );
 
     let log_flash_config = if platform == "emulator" {
         Some(&mcu_config_emulator::flash::LOGGING_FLASH_CONFIG)
@@ -462,19 +458,17 @@ pub fn runtime_build_with_apps_cached(
     println!("Total runtime binary: {} bytes", bin.len());
     println!("Runtime binary is available at {:?}", &runtime_bin);
 
-    if use_cache {
-        // update the cache
-        let cached_values = CachedValues {
-            kernel_size,
-            apps_offset,
-            apps_size: apps_bin_len,
-        };
-        println!(
-            "Updating cached values for platform {}: {:?}",
-            platform, cached_values
-        );
-        write_cached_values(platform, &cached_values);
-    }
+    // update the cache
+    let cached_values = CachedValues {
+        kernel_size,
+        apps_offset,
+        apps_size: apps_bin_len,
+    };
+    println!(
+        "Updating cached values for platform {}: {:?}",
+        platform, cached_values
+    );
+    write_cached_values(platform, &cached_values);
 
     Ok(runtime_bin.to_string_lossy().to_string())
 }
