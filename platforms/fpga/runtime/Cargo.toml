@@ -28,6 +28,7 @@ registers-generated.workspace = true
 romtime.workspace = true
 tock-registers.workspace = true
 
+mcu-config-emulator.workspace = true
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 riscv-csr.workspace = true
