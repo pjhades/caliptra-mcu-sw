@@ -18,3 +18,6 @@ libtock_runtime.workspace = true
 libtockasync.workspace = true
 mcu-mbox-common.workspace = true
 zerocopy.workspace = true
+
+# TODO: remove later
+libtock_console.workspace = true

@@ -6,7 +6,12 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
 use external_cmds_common::UnifiedCommandHandler;
 
-const MAX_MCU_MBOX_MSG_SIZE: usize = 2048; // Adjust as needed
+// Debug usage
+use core::fmt::Write;
+use libsyscall_caliptra::DefaultSyscalls;
+use libtock_console::Console;
+
+const MAX_MCU_MBOX_MSG_SIZE: usize = 1024 * 4; // Adjust as needed
 
 #[derive(Debug)]
 pub enum McuMboxServiceError {
@@ -81,6 +86,14 @@ pub async fn mcu_mbox_responder(
 ) {
     let mut msg_buffer = [0; MAX_MCU_MBOX_MSG_SIZE];
     while running.load(Ordering::SeqCst) {
-        let _ = cmd_interface.handle_responder_msg(&mut msg_buffer).await;
+        if let Err(e) = cmd_interface.handle_responder_msg(&mut msg_buffer).await {
+            // Debug print on error
+            writeln!(
+                Console::<DefaultSyscalls>::writer(),
+                "[xs debug]mcu_mbox_responder error: {:?}",
+                e
+            )
+            .unwrap();
+        }
     }
 }

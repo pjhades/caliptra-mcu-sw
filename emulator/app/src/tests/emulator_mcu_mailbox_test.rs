@@ -7,17 +7,20 @@ use emulator_mcu_mbox::mcu_mailbox_transport::{
     McuMailboxError, McuMailboxResponse, McuMailboxTransport,
 };
 use mcu_mbox_common::messages::{
-    CmShaInitReq, CmShaInitResp, DeviceCapsReq, DeviceCapsResp, DeviceIdReq, DeviceIdResp,
-    DeviceInfoReq, DeviceInfoResp, FirmwareVersionReq, FirmwareVersionResp, MailboxReqHeader,
-    MailboxRespHeader, MailboxRespHeaderVarSize, McuMailboxReq, McuMailboxResp, McuShaInitReq,
-    McuShaInitResp, DEVICE_CAPS_SIZE,
+    CmImportReq, CmKeyUsage, CmShaFinalReq, CmShaFinalResp, CmShaInitReq, CmShaUpdateReq, Cmk,
+    DeviceCapsReq, DeviceCapsResp, DeviceIdReq, DeviceIdResp, DeviceInfoReq, DeviceInfoResp,
+    FirmwareVersionReq, FirmwareVersionResp, MailboxReqHeader, MailboxRespHeader,
+    MailboxRespHeaderVarSize, McuCmImportReq, McuCmImportResp, McuCmStatusReq, McuCmStatusResp,
+    McuMailboxReq, McuMailboxResp, McuShaFinalReq, McuShaFinalResp, McuShaInitReq, McuShaInitResp,
+    McuShaUpdateReq, DEVICE_CAPS_SIZE, MAX_CMB_DATA_SIZE,
 };
+
 use mcu_testing_common::{wait_for_runtime_start, MCU_RUNNING};
 use sha2::{Digest, Sha384, Sha512};
 use std::process::exit;
 use std::sync::atomic::Ordering;
 use std::thread::sleep;
-use zerocopy::IntoBytes;
+use zerocopy::{FromBytes, IntoBytes};
 
 #[derive(Clone)]
 pub struct RequestResponseTest {
@@ -36,7 +39,6 @@ pub struct ExpectedMessagePair {
 }
 
 impl RequestResponseTest {
-    /// Utility function to process one mailbox message and get the actual response
     fn process_message(
         &mut self,
         cmd: u32,
@@ -44,10 +46,22 @@ impl RequestResponseTest {
     ) -> Result<McuMailboxResponse, McuMailboxError> {
         self.mbox.execute(cmd, request)?;
 
+        let timeout = std::time::Duration::from_secs(20);
+        let start = std::time::Instant::now();
         loop {
             match self.mbox.get_execute_response() {
                 Ok(resp) => return Ok(resp),
-                Err(McuMailboxError::Busy) => sleep(std::time::Duration::from_millis(100)),
+                Err(McuMailboxError::Busy) => {
+                    if start.elapsed() > timeout {
+                        // Print out timeout error and cmd id
+                        println!(
+                            "Timeout waiting for response for MCU mailbox cmd: {:#X}",
+                            cmd
+                        );
+                        return Err(McuMailboxError::Busy);
+                    }
+                    sleep(std::time::Duration::from_millis(100));
+                }
                 Err(e) => return Err(e),
             }
         }
@@ -81,7 +95,9 @@ impl RequestResponseTest {
         } else if cfg!(feature = "test-mcu-mbox-cmds") {
             println!("Running test-mcu-mbox-cmds test");
             self.add_basic_cmds_tests();
-            self.add_sha_tests();
+            self.add_sha_simple_tests();
+            self.add_sha_partial_update_tests();
+            self.add_sha_variable_length_tests();
         }
     }
 
@@ -106,6 +122,16 @@ impl RequestResponseTest {
         Ok(())
     }
 
+    fn direct_test_process_and_check(&mut self) -> Result<(), ()> {
+        // For crypto mailbox commands, customized response check
+        if cfg!(feature = "test-mcu-mbox-cmds") {
+            self.add_import_delete_tests();
+        }
+
+        Ok(())
+        //todo!()
+    }
+
     pub fn run(&self) {
         let transport_clone = self.mbox.clone();
         std::thread::spawn(move || {
@@ -114,13 +140,18 @@ impl RequestResponseTest {
                 exit(-1);
             }
             sleep(std::time::Duration::from_secs(5));
-            println!("Emulator: MCU MBOX Test Thread Starting: ",);
+            println!("Emulator: MCU MBOX Test Thread Starting:");
             let mut test = RequestResponseTest::new(transport_clone);
+
+            if test.direct_test_process_and_check().is_err() {
+                println!("direct_test_process_and_check failed");
+                exit(-1);
+            }
+
             if test.test_send_receive().is_err() {
                 println!("Failed");
                 exit(-1);
             } else {
-                // print out how many test messages were sent
                 println!("Sent {} test messages", test.test_messages.len());
                 println!("Passed");
             }
@@ -256,58 +287,351 @@ impl RequestResponseTest {
         );
     }
 
-    /*
-       fn test_sha384_simple() {
-           let mut model = run_rt_test(RuntimeTestArgs::default());
+    fn add_sha_simple_tests(&mut self) {
+        // Test both SHA384 and SHA512 with input "a" repeated 129 times
+        for (hash_algorithm, hash_size) in [(1, 48), (2, 64)] {
+            let input_data = "a".repeat(129);
+            let input_data = input_data.as_bytes();
 
-           model.step_until(|m| {
-               m.soc_ifc().cptra_boot_status().read() == u32::from(RtBootStatus::RtReadyForCommands)
-           });
+            // Build and send McuShaInitReq
+            let mut sha_init_req = McuMailboxReq::ShaInit(McuShaInitReq(CmShaInitReq {
+                hdr: MailboxReqHeader::default(),
+                hash_algorithm,
+                input_size: input_data.len() as u32,
+                input: {
+                    let mut input_arr = [0u8; MAX_CMB_DATA_SIZE];
+                    input_arr[..input_data.len()].copy_from_slice(input_data);
+                    input_arr
+                },
+            }));
+            sha_init_req.populate_chksum().unwrap();
 
-           let input_data = "a".repeat(129);
-           let input_data = input_data.as_bytes();
+            let sha_init_resp_bytes = self
+                .process_message(sha_init_req.cmd_code().0, sha_init_req.as_bytes().unwrap())
+                .expect("Failed to process McuShaInitReq")
+                .data;
 
-           // Simple case
-           let mut req = CmShaInitReq {
-               hash_algorithm: 1, // SHA384
-               input_size: input_data.len() as u32,
-               ..Default::default()
-           };
-           req.input[..input_data.len()].copy_from_slice(input_data);
+            let sha_init_resp = McuShaInitResp::ref_from_bytes(&sha_init_resp_bytes)
+                .expect("Failed to parse McuShaInitResp");
 
-           let mut init = MailboxReq::CmShaInit(req);
-           init.populate_chksum().unwrap();
-           let resp_bytes = model
-               .mailbox_execute(u32::from(CommandId::CM_SHA_INIT), init.as_bytes().unwrap())
-               .unwrap()
-               .expect("Should have gotten a context");
-           let resp = CmShaInitResp::ref_from_bytes(resp_bytes.as_slice()).unwrap();
+            // Build McuShaFinalReq using context from init response
+            let mut sha_final_req = McuMailboxReq::ShaFinal(McuShaFinalReq(CmShaFinalReq {
+                context: sha_init_resp.0.context,
+                ..Default::default()
+            }));
+            sha_final_req.populate_chksum().unwrap();
 
-           let req = CmShaFinalReq {
-               context: resp.context,
-               ..Default::default()
-           };
+            // Calculate expected hash
+            let expected_hash = if hash_algorithm == 1 {
+                let mut hasher = Sha384::new();
+                hasher.update(input_data);
+                let hash = hasher.finalize();
+                let mut arr = [0u8; 64];
+                arr[..48].copy_from_slice(hash.as_bytes());
+                arr
+            } else {
+                let mut hasher = Sha512::new();
+                hasher.update(input_data);
+                let hash = hasher.finalize();
+                let mut arr = [0u8; 64];
+                arr.copy_from_slice(hash.as_bytes());
+                arr
+            };
 
-           let mut fin = MailboxReq::CmShaFinal(req);
-           fin.populate_chksum().unwrap();
-           let resp_bytes = model
-               .mailbox_execute(u32::from(CommandId::CM_SHA_FINAL), fin.as_bytes().unwrap())
-               .unwrap()
-               .expect("Should have gotten a context");
+            // Build expected McuShaFinalResp
+            let mut expected_final_resp =
+                McuMailboxResp::ShaFinal(McuShaFinalResp(CmShaFinalResp {
+                    hdr: MailboxRespHeaderVarSize {
+                        data_len: hash_size as u32,
+                        ..Default::default()
+                    },
+                    hash: expected_hash,
+                }));
+            expected_final_resp.populate_chksum().unwrap();
 
-           let mut expected_resp = CmShaFinalResp::default();
-           expected_resp.hdr.data_len = 48;
+            // Push the test message pair for SHA final
+            self.push(
+                sha_final_req.cmd_code().0,
+                sha_final_req.as_bytes().unwrap().to_vec(),
+                expected_final_resp.as_bytes().unwrap().to_vec(),
+            );
+        }
+    }
 
-           let mut hasher = Sha384::new();
-           hasher.update(input_data);
-           let expected_hash = hasher.finalize();
-           expected_resp.hash[..48].copy_from_slice(expected_hash.as_bytes());
-           populate_checksum(expected_resp.as_bytes_partial_mut().unwrap());
-           let expected_bytes = expected_resp.as_bytes_partial().unwrap();
-           assert_eq!(expected_bytes, resp_bytes);
-       }
-    */
-    fn add_sha_tests(&mut self) {
-        // Add simple SHA test tests like https://github.com/chipsalliance/caliptra-sw/blob/main-2.x/runtime/tests/runtime_integration_tests/test_cryptographic_mailbox.rs#L43
+    fn add_sha_partial_update_tests(&mut self) {
+        // Add SHA384 and SHA512 partial update tests
+        for (sha, hash_size) in [(1, 48), (2, 64)] {
+            let input_str = "a".repeat(2048);
+            let original_input_data = input_str.as_bytes();
+            let mut input_data = input_str.as_bytes().to_vec();
+            let mut input_data = input_data.as_mut_slice();
+
+            let split = 32;
+            let initial = 1024;
+
+            // SHA Init
+            let mut req = CmShaInitReq {
+                hash_algorithm: sha,
+                input_size: initial as u32,
+                ..Default::default()
+            };
+            req.input[..initial].copy_from_slice(&input_data[..initial]);
+            input_data = &mut input_data[initial..];
+
+            let mut sha_init_req = McuMailboxReq::ShaInit(McuShaInitReq(req));
+            sha_init_req.populate_chksum().unwrap();
+
+            let sha_init_resp_bytes = self
+                .process_message(sha_init_req.cmd_code().0, sha_init_req.as_bytes().unwrap())
+                .expect("Failed to process McuShaInitReq")
+                .data;
+            let mut sha_init_resp = McuShaInitResp::ref_from_bytes(&sha_init_resp_bytes)
+                .expect("Failed to parse McuShaInitResp");
+
+            let mut sha_update_resp_bytes: Vec<u8>;
+            // SHA Update (partial)
+            while input_data.len() > split {
+                let mut req = CmShaUpdateReq {
+                    input_size: split as u32,
+                    context: sha_init_resp.0.context,
+                    ..Default::default()
+                };
+                req.input[..split].copy_from_slice(&input_data[..split]);
+
+                let mut sha_update_req = McuMailboxReq::ShaUpdate(McuShaUpdateReq(req));
+                sha_update_req.populate_chksum().unwrap();
+                sha_update_resp_bytes = self
+                    .process_message(
+                        sha_update_req.cmd_code().0,
+                        sha_update_req.as_bytes().unwrap(),
+                    )
+                    .expect("Failed to process McuShaUpdateReq")
+                    .data;
+
+                sha_init_resp = McuShaInitResp::ref_from_bytes(&sha_update_resp_bytes)
+                    .expect("Failed to parse McuShaUpdateResp");
+                input_data = &mut input_data[split..];
+            }
+
+            // SHA Final
+            let mut req = CmShaFinalReq {
+                input_size: input_data.len() as u32,
+                context: sha_init_resp.0.context,
+                ..Default::default()
+            };
+            req.input[..input_data.len()].copy_from_slice(input_data);
+            let mut sha_final_req = McuMailboxReq::ShaFinal(McuShaFinalReq(req));
+            sha_final_req.populate_chksum().unwrap();
+
+            // Calculate expected hash
+            let expected_hash = if sha == 1 {
+                let mut hasher = Sha384::new();
+                hasher.update(original_input_data);
+                let hash = hasher.finalize();
+                let mut arr = [0u8; 64];
+                arr[..48].copy_from_slice(hash.as_bytes());
+                arr
+            } else {
+                let mut hasher = Sha512::new();
+                hasher.update(original_input_data);
+                let hash = hasher.finalize();
+                let mut arr = [0u8; 64];
+                arr.copy_from_slice(hash.as_bytes());
+                arr
+            };
+
+            // Build expected McuShaFinalResp
+            let mut expected_final_resp =
+                McuMailboxResp::ShaFinal(McuShaFinalResp(CmShaFinalResp {
+                    hdr: MailboxRespHeaderVarSize {
+                        data_len: hash_size as u32,
+                        ..Default::default()
+                    },
+                    hash: expected_hash,
+                }));
+            expected_final_resp.populate_chksum().unwrap();
+
+            // Push the test message pair for SHA final
+            self.push(
+                sha_final_req.cmd_code().0,
+                sha_final_req.as_bytes().unwrap().to_vec(),
+                expected_final_resp.as_bytes().unwrap().to_vec(),
+            );
+        }
+    }
+
+    fn add_sha_variable_length_tests(&mut self) {
+        // Cut down on data size to accommodate mcu mbox message buffer(app) limits
+        const MCU_MAX_CMB_DATA_SIZE: usize = MAX_CMB_DATA_SIZE / 2;
+        // Add SHA384 and SHA512 variable-length tests
+        for sha in [1, 2] {
+            // 233 is a prime so should exercise different edge cases in sizes but not take too long
+            for i in (0..MCU_MAX_CMB_DATA_SIZE).step_by(233) {
+                let input_str = "a".repeat(i);
+                let input_copy = input_str.clone();
+                let original_input_data = input_copy.as_bytes();
+                let mut input_data = input_str.as_bytes().to_vec();
+                let mut input_data = input_data.as_mut_slice();
+
+                let process = input_data.len().min(MCU_MAX_CMB_DATA_SIZE);
+
+                // SHA Init
+                let mut req: CmShaInitReq = CmShaInitReq {
+                    hash_algorithm: sha,
+                    input_size: process as u32,
+                    ..Default::default()
+                };
+                req.input[..process].copy_from_slice(&input_data[..process]);
+                input_data = &mut input_data[process..];
+
+                let mut sha_init_req = McuMailboxReq::ShaInit(McuShaInitReq(req));
+                sha_init_req.populate_chksum().unwrap();
+
+                let sha_init_resp_bytes = self
+                    .process_message(sha_init_req.cmd_code().0, sha_init_req.as_bytes().unwrap())
+                    .expect("Failed to process McuShaInitReq")
+                    .data;
+                let mut sha_init_resp = McuShaInitResp::ref_from_bytes(&sha_init_resp_bytes)
+                    .expect("Failed to parse McuShaInitResp");
+
+                let mut sha_update_resp_bytes: Vec<u8>;
+
+                // SHA Update (partial)
+                while input_data.len() > MCU_MAX_CMB_DATA_SIZE {
+                    let mut req = CmShaUpdateReq {
+                        input_size: MCU_MAX_CMB_DATA_SIZE as u32,
+                        context: sha_init_resp.0.context,
+                        ..Default::default()
+                    };
+                    req.input
+                        .copy_from_slice(&input_data[..MCU_MAX_CMB_DATA_SIZE]);
+
+                    let mut sha_update_req = McuMailboxReq::ShaUpdate(McuShaUpdateReq(req));
+                    sha_update_req.populate_chksum().unwrap();
+
+                    sha_update_resp_bytes = self
+                        .process_message(
+                            sha_update_req.cmd_code().0,
+                            sha_update_req.as_bytes().unwrap(),
+                        )
+                        .expect("Failed to process McuShaUpdateReq")
+                        .data;
+
+                    sha_init_resp = McuShaInitResp::ref_from_bytes(&sha_update_resp_bytes)
+                        .expect("Failed to parse McuShaUpdateResp");
+                    input_data = &mut input_data[MCU_MAX_CMB_DATA_SIZE..];
+                }
+
+                // SHA Final
+                let mut req = CmShaFinalReq {
+                    input_size: input_data.len() as u32,
+                    context: sha_init_resp.0.context,
+                    ..Default::default()
+                };
+                req.input[..input_data.len()].copy_from_slice(input_data);
+
+                let mut sha_final_req = McuMailboxReq::ShaFinal(McuShaFinalReq(req));
+                sha_final_req.populate_chksum().unwrap();
+
+                // Calculate expected hash
+                let (hash_size, expected_hash) = if sha == 1 {
+                    let mut hasher = Sha384::new();
+                    hasher.update(original_input_data);
+                    let hash = hasher.finalize();
+                    (48, {
+                        let mut arr = [0u8; 64];
+                        arr[..48].copy_from_slice(hash.as_bytes());
+                        arr
+                    })
+                } else {
+                    let mut hasher = Sha512::new();
+                    hasher.update(original_input_data);
+                    let hash = hasher.finalize();
+                    (64, {
+                        let mut arr = [0u8; 64];
+                        arr.copy_from_slice(hash.as_bytes());
+                        arr
+                    })
+                };
+
+                // Build expected McuShaFinalResp
+                let mut expected_final_resp =
+                    McuMailboxResp::ShaFinal(McuShaFinalResp(CmShaFinalResp {
+                        hdr: MailboxRespHeaderVarSize {
+                            data_len: hash_size as u32,
+                            ..Default::default()
+                        },
+                        hash: expected_hash,
+                    }));
+                expected_final_resp.populate_chksum().unwrap();
+
+                // Push the test message pair for SHA final
+                self.push(
+                    sha_final_req.cmd_code().0,
+                    sha_final_req.as_bytes().unwrap().to_vec(),
+                    expected_final_resp.as_bytes().unwrap().to_vec(),
+                );
+            }
+        }
+    }
+
+    fn add_import_delete_tests(&mut self) {
+        let cmk = self.import_key(&[0xbb; 32], CmKeyUsage::Aes);
+        // Check status after import
+        self.check_cm_status(1, 256);
+        // Now delete the key
+        self.delete_key(&cmk);
+        // Check status after delete
+        self.check_cm_status(0, 256);
+    }
+
+    fn import_key(&mut self, key: &[u8], key_usage: CmKeyUsage) -> Cmk {
+        let mut input = [0u8; 64];
+        input[..key.len()].copy_from_slice(key);
+
+        let mut import_req = McuMailboxReq::Import(McuCmImportReq(CmImportReq {
+            hdr: MailboxReqHeader { chksum: 0 },
+            key_usage: key_usage.into(),
+            input_size: key.len() as u32,
+            input,
+        }));
+        import_req.populate_chksum().unwrap();
+
+        let resp = self
+            .process_message(import_req.cmd_code().0, import_req.as_bytes().unwrap())
+            .unwrap();
+        let import_resp = McuCmImportResp::ref_from_bytes(&resp.data).unwrap();
+        assert_eq!(
+            import_resp.0.hdr.fips_status,
+            MailboxRespHeader::FIPS_STATUS_APPROVED
+        );
+        import_resp.0.cmk.clone()
+    }
+
+    fn delete_key(&mut self, cmk: &Cmk) {
+        let mut delete_req = McuMailboxReq::Delete(mcu_mbox_common::messages::McuCmDeleteReq(
+            mcu_mbox_common::messages::CmDeleteReq {
+                hdr: MailboxReqHeader::default(),
+                cmk: cmk.clone(),
+            },
+        ));
+        delete_req.populate_chksum().unwrap();
+
+        let _resp = self
+            .process_message(delete_req.cmd_code().0, delete_req.as_bytes().unwrap())
+            .expect("Delete key should receive a response");
+    }
+
+    fn check_cm_status(&mut self, expected_used: u32, expected_total: u32) {
+        let mut status_req = McuMailboxReq::CmStatus(McuCmStatusReq::default());
+        status_req.populate_chksum().unwrap();
+
+        let status_resp_bytes = self
+            .process_message(status_req.cmd_code().0, status_req.as_bytes().unwrap())
+            .expect("We should have received a response")
+            .data;
+        let status_resp = McuCmStatusResp::ref_from_bytes(&status_resp_bytes).unwrap();
+        assert_eq!(status_resp.0.used_usage_storage, expected_used);
+        assert_eq!(status_resp.0.total_usage_storage, expected_total);
     }
 }
