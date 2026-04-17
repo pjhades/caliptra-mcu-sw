@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+extern crate alloc;
+
 use crate::cert_store::{spdm_cert_chain_hash, MAX_CERT_SLOTS_SUPPORTED};
 use crate::codec::{encode_u8_slice, Codec, CommonCodec, MessageBuf};
 use crate::commands::algorithms_rsp::selected_measurement_specification;
@@ -17,6 +19,7 @@ use crate::session::{SessionInfo, SessionKeyType, SessionPolicy, SessionState, S
 use crate::state::ConnectionInfo;
 use crate::state::ConnectionState;
 use crate::transcript::TranscriptContext;
+use alloc::boxed::Box;
 use bitfield::bitfield;
 use caliptra_mcu_libapi_caliptra::crypto::asym::ecdh::CMB_ECDH_EXCHANGE_DATA_MAX_SIZE;
 use caliptra_mcu_libapi_caliptra::crypto::asym::{AsymAlgo, ECC_P384_SIGNATURE_SIZE};
@@ -145,21 +148,14 @@ async fn process_key_exchange<'a>(
     // Note: Pubkey of the responder will not be pre-provisioned to Requester. So slot ID 0xFF is invalid.
     if exch_req.slot_id >= MAX_CERT_SLOTS_SUPPORTED
         || ctx.local_capabilities.flags.cert_cap() == 0
-        || !ctx
-            .device_certs_store
-            .is_provisioned(exch_req.slot_id)
-            .await
+        || !Box::pin(ctx.device_certs_store.is_provisioned(exch_req.slot_id)).await
     {
         Err(ctx.generate_error_response(req_payload, ErrorCode::InvalidRequest, 0, None))?;
     }
 
     // If multi-key connection response is supported, validate the key supports key_exch usage
     if connection_version >= SpdmVersion::V13 && ctx.state.connection_info.multi_key_conn_rsp() {
-        match ctx
-            .device_certs_store
-            .key_usage_mask(exch_req.slot_id)
-            .await
-        {
+        match Box::pin(ctx.device_certs_store.key_usage_mask(exch_req.slot_id)).await {
             Some(key_usage_mask) if key_usage_mask.key_exch_usage() != 0 => {}
             _ => Err(ctx.generate_error_response(req_payload, ErrorCode::InvalidRequest, 0, None))?,
         }
@@ -209,8 +205,7 @@ async fn process_key_exchange<'a>(
         asym_algo,
     );
 
-    let resp_exch_data = session_info
-        .compute_dhe_secret(&exch_req.exchange_data)
+    let resp_exch_data = Box::pin(session_info.compute_dhe_secret(&exch_req.exchange_data))
         .await
         .map_err(|e| (false, CommandError::Session(e)))?;
 
@@ -219,21 +214,25 @@ async fn process_key_exchange<'a>(
 
     let mut cert_chain_hash = [0u8; SHA384_HASH_SIZE];
 
-    spdm_cert_chain_hash(
+    Box::pin(spdm_cert_chain_hash(
         ctx.device_certs_store,
         exch_req.slot_id,
         asym_algo,
         &mut cert_chain_hash,
-    )
+    ))
     .await
     .map_err(|e| (false, CommandError::CertStore(e)))?;
 
     // Update transcript
     // Hash of the cert chain in DER format
     // KEY_EXCHANGE request
-    ctx.append_slice_to_transcript(&cert_chain_hash, TranscriptContext::Th, Some(session_id))
-        .await?;
-    ctx.append_message_to_transcript(req_payload, TranscriptContext::Th, Some(session_id))
+    Box::pin(ctx.append_slice_to_transcript(
+        &cert_chain_hash,
+        TranscriptContext::Th,
+        Some(session_id),
+    ))
+    .await?;
+    Box::pin(ctx.append_message_to_transcript(req_payload, TranscriptContext::Th, Some(session_id)))
         .await?;
 
     Ok(KeyExchRspContext {
@@ -258,7 +257,7 @@ async fn encode_key_exchange_rsp_base(
         .copy_from_slice(&resp_exchange_data);
 
     // Generate random data
-    Rng::generate_random_number(&mut key_exch_rsp.random_data)
+    Box::pin(Rng::generate_random_number(&mut key_exch_rsp.random_data))
         .await
         .map_err(|e| (false, CommandError::CaliptraApi(e)))?;
 
@@ -275,27 +274,28 @@ async fn th1_signature(
     asym_algo: AsymAlgo,
 ) -> CommandResult<[u8; ECC_P384_SIGNATURE_SIZE]> {
     let spdm_version = ctx.state.connection_info.version_number();
-    let th1_transcript_hash = ctx
-        .transcript_hash(
-            TranscriptContext::Th,
-            Some(session_id),
-            false, // Do not finish hash yet
-        )
-        .await?;
+    let th1_transcript_hash = Box::pin(ctx.transcript_hash(
+        TranscriptContext::Th,
+        Some(session_id),
+        false, // Do not finish hash yet
+    ))
+    .await?;
 
-    let tbs = get_tbs_via_response_code(
+    let tbs = Box::pin(get_tbs_via_response_code(
         spdm_version,
         ReqRespCode::KeyExchangeRsp,
         th1_transcript_hash,
-    )
+    ))
     .await
     .map_err(|e| (false, CommandError::SignCtx(e)))?;
 
     let mut signature = [0u8; ECC_P384_SIGNATURE_SIZE];
-    ctx.device_certs_store
-        .sign_hash(slot_id, asym_algo, &tbs, &mut signature)
-        .await
-        .map_err(|e| (false, CommandError::CertStore(e)))?;
+    Box::pin(
+        ctx.device_certs_store
+            .sign_hash(slot_id, asym_algo, &tbs, &mut signature),
+    )
+    .await
+    .map_err(|e| (false, CommandError::CertStore(e)))?;
     Ok(signature)
 }
 
@@ -315,18 +315,21 @@ async fn generate_key_exchange_response<'a>(
         .map_err(|e| (false, CommandError::Codec(e)))?;
 
     // Encode the KEY_EXCHANGE response fixed fields
-    payload_len += encode_key_exchange_rsp_base(
+    payload_len += Box::pin(encode_key_exchange_rsp_base(
         key_exch_rsp_ctx.resp_session_id,
         key_exch_rsp_ctx.resp_exch_data,
         rsp,
-    )
+    ))
     .await?;
 
     // Get the measurement summary hash
     if key_exch_rsp_ctx.meas_summary_hash_type != 0 {
-        payload_len +=
-            encode_measurement_summary_hash(ctx, key_exch_rsp_ctx.meas_summary_hash_type, rsp)
-                .await?;
+        payload_len += Box::pin(encode_measurement_summary_hash(
+            ctx,
+            key_exch_rsp_ctx.meas_summary_hash_type,
+            rsp,
+        ))
+        .await?;
     }
 
     let opaque_data = sm_selected_version_opaque_data(key_exch_rsp_ctx.selected_sm_version)
@@ -338,40 +341,39 @@ async fn generate_key_exchange_response<'a>(
         .map_err(|e| (false, CommandError::Codec(e)))?;
 
     // Append the response to Th transcript
-    ctx.append_message_to_transcript(
+    Box::pin(ctx.append_message_to_transcript(
         rsp,
         TranscriptContext::Th,
         Some(key_exch_rsp_ctx.session_id),
-    )
+    ))
     .await?;
 
     // Encode TH1 signature.
-    let th1_sig = th1_signature(
+    let th1_sig = Box::pin(th1_signature(
         ctx,
         key_exch_rsp_ctx.session_id,
         key_exch_rsp_ctx.slot_id,
         asym_algo,
-    )
+    ))
     .await?;
 
     payload_len += encode_u8_slice(&th1_sig, rsp).map_err(|e| (false, CommandError::Codec(e)))?;
 
     // Update the session transcript with the KEY_EXCHANGE_RSP signature
-    ctx.append_slice_to_transcript(
+    Box::pin(ctx.append_slice_to_transcript(
         &th1_sig,
         TranscriptContext::Th,
         Some(key_exch_rsp_ctx.session_id),
-    )
+    ))
     .await?;
 
     // Compute TH1 transcript hash for generating the session handshake key
-    let th1_transcript_hash = ctx
-        .transcript_hash(
-            TranscriptContext::Th,
-            Some(key_exch_rsp_ctx.session_id),
-            false,
-        )
-        .await?;
+    let th1_transcript_hash = Box::pin(ctx.transcript_hash(
+        TranscriptContext::Th,
+        Some(key_exch_rsp_ctx.session_id),
+        false,
+    ))
+    .await?;
 
     // generate session handshake key
     let session_info = ctx
@@ -379,8 +381,7 @@ async fn generate_key_exchange_response<'a>(
         .session_info_mut(key_exch_rsp_ctx.session_id)
         .map_err(|e| (false, CommandError::Session(e)))?;
 
-    session_info
-        .generate_session_handshake_key(&th1_transcript_hash)
+    Box::pin(session_info.generate_session_handshake_key(&th1_transcript_hash))
         .await
         .map_err(|e| (false, CommandError::Session(e)))?;
 
@@ -389,10 +390,12 @@ async fn generate_key_exchange_response<'a>(
         && session_info.session_type != SessionType::None
     {
         Some(
-            session_info
-                .compute_hmac(SessionKeyType::ResponseFinishedKey, &th1_transcript_hash)
-                .await
-                .map_err(|e| (false, CommandError::Session(e)))?,
+            Box::pin(
+                session_info
+                    .compute_hmac(SessionKeyType::ResponseFinishedKey, &th1_transcript_hash),
+            )
+            .await
+            .map_err(|e| (false, CommandError::Session(e)))?,
         )
     } else {
         None
@@ -402,11 +405,11 @@ async fn generate_key_exchange_response<'a>(
         payload_len += encode_u8_slice(&responder_verify_data, rsp)
             .map_err(|e| (false, CommandError::Codec(e)))?;
 
-        ctx.append_slice_to_transcript(
+        Box::pin(ctx.append_slice_to_transcript(
             &responder_verify_data,
             TranscriptContext::Th,
             Some(key_exch_rsp_ctx.session_id),
-        )
+        ))
         .await?;
     }
 
@@ -446,16 +449,17 @@ pub(crate) async fn handle_key_exchange<'a>(
     let asym_algo = ctx.validate_negotiated_base_asym_algo(req_payload)?;
 
     // Process KEY_EXCHANGE request
-    let key_exch_rsp_ctx = match process_key_exchange(ctx, asym_algo, spdm_hdr, req_payload).await {
-        Ok(result) => result,
-        Err(e) => {
-            if ctx.session_mgr.handshake_phase_session_id().is_some() {
-                let session_id = ctx.session_mgr.handshake_phase_session_id().unwrap();
-                let _ = ctx.session_mgr.delete_session(session_id);
+    let key_exch_rsp_ctx =
+        match Box::pin(process_key_exchange(ctx, asym_algo, spdm_hdr, req_payload)).await {
+            Ok(result) => result,
+            Err(e) => {
+                if ctx.session_mgr.handshake_phase_session_id().is_some() {
+                    let session_id = ctx.session_mgr.handshake_phase_session_id().unwrap();
+                    let _ = ctx.session_mgr.delete_session(session_id);
+                }
+                return Err(e);
             }
-            return Err(e);
-        }
-    };
+        };
 
     // Generate KEY_EXCHANGE response
     ctx.prepare_response_buffer(req_payload)?;
@@ -463,8 +467,13 @@ pub(crate) async fn handle_key_exchange<'a>(
     let session_id = key_exch_rsp_ctx.session_id;
 
     // Generate response with automatic cleanup on error
-    if let Err(e) =
-        generate_key_exchange_response(ctx, asym_algo, key_exch_rsp_ctx, req_payload).await
+    if let Err(e) = Box::pin(generate_key_exchange_response(
+        ctx,
+        asym_algo,
+        key_exch_rsp_ctx,
+        req_payload,
+    ))
+    .await
     {
         // Clean up session on error
         if ctx.session_mgr.handshake_phase_session_id().is_some() {
