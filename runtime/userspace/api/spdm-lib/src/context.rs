@@ -1,5 +1,7 @@
 // Licensed under the Apache-2.0 license
 
+extern crate alloc;
+
 use crate::cert_store::*;
 use crate::chunk_ctx::LargeResponseCtx;
 use crate::codec::{encode_u8_slice, Codec, MessageBuf};
@@ -20,10 +22,13 @@ use crate::state::{ConnectionState, State};
 use crate::transcript::{Transcript, TranscriptContext};
 use crate::transport::common::SpdmTransport;
 use crate::vdm_handler::VdmHandler;
+use alloc::boxed::Box;
 use caliptra_mcu_libapi_caliptra::crypto::aes_gcm::Aes256GcmTag;
 use caliptra_mcu_libapi_caliptra::crypto::asym::*;
 use caliptra_mcu_libapi_caliptra::crypto::hash::SHA384_HASH_SIZE;
+use core::future::Future;
 use core::mem::size_of;
+use core::pin::Pin;
 
 // Maximum SPDM responder buffer size
 pub const MAX_SPDM_RESPONDER_BUF_SIZE: usize = 1024;
@@ -138,44 +143,56 @@ impl<'a> SpdmContext<'a> {
         // Check for requests prohibited within session
         self.validate_request_in_session_context(req_code, req)?;
 
-        match req_code {
-            ReqRespCode::GetVersion => {
-                version_rsp::handle_get_version(self, req_msg_header, req).await?
-            }
-            ReqRespCode::GetCapabilities => {
-                capabilities_rsp::handle_get_capabilities(self, req_msg_header, req).await?
-            }
-            ReqRespCode::NegotiateAlgorithms => {
-                algorithms_rsp::handle_negotiate_algorithms(self, req_msg_header, req).await?
-            }
-            ReqRespCode::GetDigests => {
-                digests_rsp::handle_get_digests(self, req_msg_header, req).await?
-            }
-            ReqRespCode::GetCertificate => {
-                certificate_rsp::handle_get_certificate(self, req_msg_header, req).await?
-            }
-            ReqRespCode::Challenge => {
-                challenge_auth_rsp::handle_challenge(self, req_msg_header, req).await?
-            }
-            ReqRespCode::GetMeasurements => {
-                measurements_rsp::handle_get_measurements(self, req_msg_header, req).await?
-            }
-            ReqRespCode::ChunkGet => {
-                chunk_get_rsp::handle_chunk_get(self, req_msg_header, req).await?
-            }
-            ReqRespCode::KeyExchange => {
-                key_exchange_rsp::handle_key_exchange(self, req_msg_header, req).await?
-            }
-            ReqRespCode::Finish => finish_rsp::handle_finish(self, req_msg_header, req).await?,
-            ReqRespCode::EndSession => {
-                end_session_ack_rsp::handle_end_session(self, req_msg_header, req).await?
-            }
-            ReqRespCode::VendorDefinedRequest => {
-                vendor_defined_rsp::handle_vendor_defined_request(self, req_msg_header, req).await?
-            }
-            _ => Err((false, CommandError::UnsupportedRequest))?,
-        }
-        Ok(())
+        let fut: Pin<Box<dyn Future<Output = CommandResult<()>>>> =
+            match req_code {
+                ReqRespCode::GetVersion => {
+                    Box::pin(version_rsp::handle_get_version(self, req_msg_header, req))
+                }
+                ReqRespCode::GetCapabilities => Box::pin(
+                    capabilities_rsp::handle_get_capabilities(self, req_msg_header, req),
+                ),
+                ReqRespCode::NegotiateAlgorithms => Box::pin(
+                    algorithms_rsp::handle_negotiate_algorithms(self, req_msg_header, req),
+                ),
+                ReqRespCode::GetDigests => {
+                    Box::pin(digests_rsp::handle_get_digests(self, req_msg_header, req))
+                }
+                ReqRespCode::GetCertificate => Box::pin(certificate_rsp::handle_get_certificate(
+                    self,
+                    req_msg_header,
+                    req,
+                )),
+                ReqRespCode::Challenge => Box::pin(challenge_auth_rsp::handle_challenge(
+                    self,
+                    req_msg_header,
+                    req,
+                )),
+                ReqRespCode::GetMeasurements => Box::pin(
+                    measurements_rsp::handle_get_measurements(self, req_msg_header, req),
+                ),
+                ReqRespCode::ChunkGet => {
+                    Box::pin(chunk_get_rsp::handle_chunk_get(self, req_msg_header, req))
+                }
+                ReqRespCode::KeyExchange => Box::pin(key_exchange_rsp::handle_key_exchange(
+                    self,
+                    req_msg_header,
+                    req,
+                )),
+                ReqRespCode::Finish => {
+                    Box::pin(finish_rsp::handle_finish(self, req_msg_header, req))
+                }
+                ReqRespCode::EndSession => Box::pin(end_session_ack_rsp::handle_end_session(
+                    self,
+                    req_msg_header,
+                    req,
+                )),
+                ReqRespCode::VendorDefinedRequest => Box::pin(
+                    vendor_defined_rsp::handle_vendor_defined_request(self, req_msg_header, req),
+                ),
+                _ => return Err((false, CommandError::UnsupportedRequest)),
+            };
+
+        fut.await
     }
 
     async fn send_response(&mut self, resp: &mut MessageBuf<'a>, secure: bool) -> SpdmResult<()> {
