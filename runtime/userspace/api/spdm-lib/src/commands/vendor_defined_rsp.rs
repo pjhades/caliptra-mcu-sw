@@ -178,7 +178,7 @@ impl VendorLargeResponse {
     }
 }
 
-async fn process_vendor_defined_request<'a>(
+fn process_vendor_defined_request<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -347,7 +347,7 @@ pub(crate) async fn handle_vendor_defined_request<'a>(
 
     // Process VENDOR_DEFINED_REQUEST
     let (standard_id, vendor_id, mut vdm_req, vdm_req_len) =
-        process_vendor_defined_request(ctx, spdm_hdr, req_payload).await?;
+        process_vendor_defined_request(ctx, spdm_hdr, req_payload)?;
 
     let mut vdm_req_buf = MessageBuf::from(&mut vdm_req[..vdm_req_len]);
     ctx.prepare_response_buffer(req_payload)?;

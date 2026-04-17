@@ -181,11 +181,9 @@ impl<'a> SpdmContext<'a> {
                 ReqRespCode::Finish => {
                     Box::pin(finish_rsp::handle_finish(self, req_msg_header, req))
                 }
-                ReqRespCode::EndSession => Box::pin(end_session_ack_rsp::handle_end_session(
-                    self,
-                    req_msg_header,
-                    req,
-                )),
+                ReqRespCode::EndSession => {
+                    return end_session_ack_rsp::handle_end_session(self, req_msg_header, req);
+                }
                 ReqRespCode::VendorDefinedRequest => Box::pin(
                     vendor_defined_rsp::handle_vendor_defined_request(self, req_msg_header, req),
                 ),

@@ -84,7 +84,7 @@ pub(crate) struct CertificateResponse {
 }
 
 impl CertificateResponse {
-    async fn resp_hdr(&self) -> CommandResult<[u8; CERTIFICATE_RESP_HEADER_SIZE]> {
+    fn resp_hdr(&self) -> CommandResult<[u8; CERTIFICATE_RESP_HEADER_SIZE]> {
         let mut buf = [0u8; CERTIFICATE_RESP_HEADER_SIZE];
         let mut msg_buf = MessageBuf::new(&mut buf);
 
@@ -109,7 +109,7 @@ impl CertificateResponse {
     }
 
     pub async fn encode_rsp_hdr(&self, rsp: &mut MessageBuf<'_>) -> CommandResult<usize> {
-        let rsp_hdr_bytes = self.resp_hdr().await?;
+        let rsp_hdr_bytes = self.resp_hdr()?;
         rsp.put_data(rsp_hdr_bytes.len())
             .map_err(|e| (false, CommandError::Codec(e)))?;
         let rsp_hdr_buf = rsp
@@ -135,7 +135,7 @@ impl CertificateResponse {
             .min((self.portion_len - cert_rsp_offset as u16) as usize);
         if cert_rsp_offset < CERTIFICATE_RESP_HEADER_SIZE {
             // Read from the response header
-            let header_bytes = self.resp_hdr().await?;
+            let header_bytes = self.resp_hdr()?;
             let header_offset = cert_rsp_offset;
             let header_rem_len = CERTIFICATE_RESP_HEADER_SIZE - header_offset;
             let copy_len = header_rem_len.min(chunk.len());

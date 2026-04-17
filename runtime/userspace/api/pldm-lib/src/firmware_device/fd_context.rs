@@ -79,7 +79,7 @@ impl<'a> FirmwareDeviceContext<'a> {
         }
     }
 
-    pub async fn query_devid_rsp(&self, payload: &mut [u8]) -> Result<usize, MsgHandlerError> {
+    pub fn query_devid_rsp(&self, payload: &mut [u8]) -> Result<usize, MsgHandlerError> {
         // Decode the request message
         let req = QueryDeviceIdentifiersRequest::decode(payload).map_err(MsgHandlerError::Codec)?;
 
@@ -109,7 +109,7 @@ impl<'a> FirmwareDeviceContext<'a> {
         }
     }
 
-    pub async fn get_firmware_parameters_rsp(
+    pub fn get_firmware_parameters_rsp(
         &self,
         payload: &mut [u8],
     ) -> Result<usize, MsgHandlerError> {

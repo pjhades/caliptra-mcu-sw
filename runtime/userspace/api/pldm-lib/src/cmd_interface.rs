@@ -221,9 +221,9 @@ impl<'a> CmdInterface<'a> {
         };
 
         let fut: Pin<Box<dyn Future<Output = Result<usize, MsgHandlerError>>>> = match cmd {
-            FwUpdateCmd::QueryDeviceIdentifiers => Box::pin(self.fd_ctx.query_devid_rsp(payload)),
+            FwUpdateCmd::QueryDeviceIdentifiers => return self.fd_ctx.query_devid_rsp(payload),
             FwUpdateCmd::GetFirmwareParameters => {
-                Box::pin(self.fd_ctx.get_firmware_parameters_rsp(payload))
+                return self.fd_ctx.get_firmware_parameters_rsp(payload);
             }
             FwUpdateCmd::RequestUpdate => Box::pin(self.fd_ctx.request_update_rsp(payload)),
             FwUpdateCmd::PassComponentTable => Box::pin(self.fd_ctx.pass_component_rsp(payload)),

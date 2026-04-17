@@ -147,11 +147,11 @@ impl<'a> CmdInterface<'a> {
                 ),
                 #[cfg(feature = "periodic-fips-self-test")]
                 CommandId::MC_FIPS_PERIODIC_ENABLE => {
-                    Box::pin(self.handle_fips_periodic_enable(msg_buf, req_len))
+                    Box::pin(ready(self.handle_fips_periodic_enable(msg_buf, req_len)))
                 }
                 #[cfg(feature = "periodic-fips-self-test")]
                 CommandId::MC_FIPS_PERIODIC_STATUS => {
-                    Box::pin(self.handle_fips_periodic_status(msg_buf, req_len))
+                    Box::pin(ready(self.handle_fips_periodic_status(msg_buf, req_len)))
                 }
                 CommandId::MC_SHA_INIT => Box::pin(
                     self.handle_crypto_passthrough::<McuShaInitReq, { size_of::<McuShaInitResp>() }>(
@@ -572,7 +572,7 @@ impl<'a> CmdInterface<'a> {
     }
 
     #[cfg(feature = "periodic-fips-self-test")]
-    async fn handle_fips_periodic_enable(
+    fn handle_fips_periodic_enable(
         &self,
         msg_buf: &mut [u8],
         req_len: usize,
@@ -606,7 +606,7 @@ impl<'a> CmdInterface<'a> {
     }
 
     #[cfg(feature = "periodic-fips-self-test")]
-    async fn handle_fips_periodic_status(
+    fn handle_fips_periodic_status(
         &self,
         msg_buf: &mut [u8],
         req_len: usize,
