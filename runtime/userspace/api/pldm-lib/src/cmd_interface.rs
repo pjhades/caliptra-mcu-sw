@@ -1,9 +1,12 @@
 // Licensed under the Apache-2.0 license
 
+extern crate alloc;
+
 use crate::control_context::{ControlContext, CtrlCmdResponder, ProtocolCapability};
 use crate::error::MsgHandlerError;
 use crate::firmware_device::fd_context::FirmwareDeviceContext;
 use crate::transport::MctpTransport;
+use alloc::boxed::Box;
 use caliptra_mcu_pldm_common::codec::PldmCodec;
 use caliptra_mcu_pldm_common::protocol::base::{
     PldmBaseCompletionCode, PldmControlCmd, PldmFailureResponse, PldmMsgHeader, PldmSupportedType,
@@ -12,6 +15,8 @@ use caliptra_mcu_pldm_common::protocol::firmware_update::FwUpdateCmd;
 use caliptra_mcu_pldm_common::util::mctp_transport::{
     construct_mctp_pldm_msg, extract_pldm_msg, MCTP_PLDM_MSG_HDR_LEN,
 };
+use core::future::Future;
+use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 pub type PldmCompletionErrorCode = u8;
@@ -205,31 +210,39 @@ impl<'a> CmdInterface<'a> {
         cmd_opcode: u8,
         payload: &mut [u8],
     ) -> Result<usize, MsgHandlerError> {
-        match FwUpdateCmd::try_from(cmd_opcode) {
-            Ok(cmd) => match cmd {
-                FwUpdateCmd::QueryDeviceIdentifiers => self.fd_ctx.query_devid_rsp(payload).await,
-                FwUpdateCmd::GetFirmwareParameters => {
-                    self.fd_ctx.get_firmware_parameters_rsp(payload).await
-                }
-                FwUpdateCmd::RequestUpdate => self.fd_ctx.request_update_rsp(payload).await,
-                FwUpdateCmd::PassComponentTable => self.fd_ctx.pass_component_rsp(payload).await,
-                FwUpdateCmd::UpdateComponent => self.fd_ctx.update_component_rsp(payload).await,
-
-                FwUpdateCmd::ActivateFirmware => self.fd_ctx.activate_firmware_rsp(payload).await,
-                FwUpdateCmd::CancelUpdateComponent => {
-                    self.fd_ctx.cancel_update_component_rsp(payload).await
-                }
-                FwUpdateCmd::CancelUpdate => self.fd_ctx.cancel_update_rsp(payload).await,
-                FwUpdateCmd::GetStatus => self.fd_ctx.get_status_rsp(payload).await,
-                _ => generate_failure_response(
+        let cmd = match FwUpdateCmd::try_from(cmd_opcode) {
+            Ok(c) => c,
+            Err(_) => {
+                return generate_failure_response(
                     payload,
                     PldmBaseCompletionCode::UnsupportedPldmCmd as u8,
-                ),
-            },
-            Err(_) => {
-                generate_failure_response(payload, PldmBaseCompletionCode::UnsupportedPldmCmd as u8)
+                );
             }
-        }
+        };
+
+        let fut: Pin<Box<dyn Future<Output = Result<usize, MsgHandlerError>>>> = match cmd {
+            FwUpdateCmd::QueryDeviceIdentifiers => Box::pin(self.fd_ctx.query_devid_rsp(payload)),
+            FwUpdateCmd::GetFirmwareParameters => {
+                Box::pin(self.fd_ctx.get_firmware_parameters_rsp(payload))
+            }
+            FwUpdateCmd::RequestUpdate => Box::pin(self.fd_ctx.request_update_rsp(payload)),
+            FwUpdateCmd::PassComponentTable => Box::pin(self.fd_ctx.pass_component_rsp(payload)),
+            FwUpdateCmd::UpdateComponent => Box::pin(self.fd_ctx.update_component_rsp(payload)),
+            FwUpdateCmd::ActivateFirmware => Box::pin(self.fd_ctx.activate_firmware_rsp(payload)),
+            FwUpdateCmd::CancelUpdateComponent => {
+                Box::pin(self.fd_ctx.cancel_update_component_rsp(payload))
+            }
+            FwUpdateCmd::CancelUpdate => Box::pin(self.fd_ctx.cancel_update_rsp(payload)),
+            FwUpdateCmd::GetStatus => Box::pin(self.fd_ctx.get_status_rsp(payload)),
+            _ => {
+                return generate_failure_response(
+                    payload,
+                    PldmBaseCompletionCode::UnsupportedPldmCmd as u8,
+                );
+            }
+        };
+
+        fut.await
     }
 
     fn preprocess_request(
