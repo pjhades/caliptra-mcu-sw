@@ -6,8 +6,11 @@ use crate::DefaultSyscalls;
 use alloc::boxed::Box;
 use async_trait::async_trait;
 use caliptra_api::mailbox::MailboxReqHeader;
-use caliptra_mcu_libtock_platform::{share, DefaultConfig, ErrorCode, Syscalls};
+use caliptra_mcu_libtock_platform::{
+    share, DefaultConfig, ErrorCode, Syscalls, TockSubscribe as TockSubscribeSync,
+};
 use caliptra_mcu_libtockasync::TockSubscribe;
+use core::pin::pin;
 use core::{hint::black_box, marker::PhantomData};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 
@@ -110,6 +113,51 @@ impl<S: Syscalls> Mailbox<S> {
 
             result
         };
+
+        match result {
+            Ok((bytes, error_code, _)) => {
+                if error_code != 0 {
+                    Err(MailboxError::MailboxError(error_code))
+                } else {
+                    Ok(bytes as usize)
+                }
+            }
+            Err(err) => Err(MailboxError::ErrorCode(err)),
+        }
+    }
+
+    pub fn execute_sync(
+        &self,
+        command: u32,
+        input_data: &[u8],
+        response_buffer: &mut [u8],
+    ) -> Result<usize, MailboxError> {
+        // Subscribe to the asynchronous notification for when the command is processed
+        let result = share::scope::<(), _, _>(|_handle| {
+            let mut sub = pin!(TockSubscribeSync::<S>::new());
+
+            sub.as_mut().subscribe_allow_ro_rw::<DefaultConfig>(
+                self.driver_num,
+                mailbox_subscribe::COMMAND_DONE,
+                mailbox_ro_buffer::INPUT,
+                input_data,
+                mailbox_rw_buffer::RESPONSE,
+                response_buffer,
+            );
+
+            // Issue the command to the kernel
+            S::command(self.driver_num, mailbox_cmd::EXECUTE_COMMAND, command, 0)
+                .to_result::<(), ErrorCode>()
+                .map_err(|err| {
+                    S::unallow_ro(self.driver_num, mailbox_ro_buffer::INPUT);
+                    S::unallow_rw(self.driver_num, mailbox_rw_buffer::RESPONSE);
+                    // If command returned error immediately, cancel the subscription
+                    sub.as_mut().cancel();
+                    err
+                })?;
+
+            sub.poll()
+        });
 
         match result {
             Ok((bytes, error_code, _)) => {
