@@ -16,6 +16,7 @@ pub mod subscribe;
 mod syscalls;
 mod syscalls_impl;
 mod termination;
+pub mod tock_subscribe;
 mod yield_types;
 
 pub use allow_ro::AllowRo;
@@ -30,6 +31,7 @@ pub use return_variant::ReturnVariant;
 pub use subscribe::{Subscribe, Upcall};
 pub use syscalls::Syscalls;
 pub use termination::Termination;
+pub use tock_subscribe::TockSubscribe;
 pub use yield_types::YieldNoWaitReturn;
 
 #[cfg(test)]

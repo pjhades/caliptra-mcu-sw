@@ -149,6 +149,7 @@ num_enum = "0.7.2"
 num-derive = "0.4.2"
 num-traits = "0.2"
 openssl = { version = "0.10", features = ["vendored"] }
+pin-project-lite = "0.2.17"
 pkcs8 = "0.10.2"
 portable-atomic = "1.7.0"
 p384 = "0.13.0"
