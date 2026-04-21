@@ -1,15 +1,11 @@
 // Licensed under the Apache-2.0 license
 
-extern crate alloc;
-
 use crate::codec::{CodecError, MessageBuf};
 use crate::protocol::*;
 use crate::vdm_handler::iana::ocp::envelope_signed_csr_rsp::EnvelopeSignedCsrRspCtx;
 use crate::vdm_handler::iana::ocp::get_eat_rsp::GetEatRspCtx;
 use crate::vdm_handler::pci_sig::ide_km::driver::IdeDriverError;
 use crate::vdm_handler::pci_sig::tdisp::driver::TdispDriverError;
-use alloc::boxed::Box;
-use async_trait::async_trait;
 
 pub mod iana;
 pub mod pci_sig;
@@ -38,9 +34,8 @@ pub enum VdmError {
 
 pub type VdmResult<T> = Result<T, VdmError>;
 
-#[async_trait]
 pub trait VdmResponder {
-    async fn handle_request(
+    fn handle_request(
         &mut self,
         req_buf: &mut MessageBuf<'_>,
         rsp_buf: &mut MessageBuf<'_>,

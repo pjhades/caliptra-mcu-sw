@@ -4,7 +4,7 @@
 
 use crate::codec::{encode_u8_slice, Codec, CodecError, MessageBuf};
 use crate::context::MAX_SPDM_RESPONDER_BUF_SIZE;
-use crate::transport::common::SpdmTransport;
+use crate::transport::common::SpdmTransportSync;
 use caliptra_mcu_libapi_caliptra::crypto::aes_gcm::Aes256GcmTag;
 use caliptra_mcu_libapi_caliptra::error::CaliptraApiError;
 use core::mem::size_of;
@@ -150,9 +150,9 @@ impl SessionManager {
             .ok_or(SessionError::InvalidSessionId)
     }
 
-    pub async fn encode_secure_message(
+    pub fn encode_secure_message(
         &mut self,
-        transport: &dyn SpdmTransport,
+        transport: &dyn SpdmTransportSync,
         app_data_buffer: &[u8],
         secure_message: &mut MessageBuf<'_>,
     ) -> SessionResult<()> {
@@ -190,13 +190,11 @@ impl SessionManager {
             .message_slice(aead_len)
             .map_err(SessionError::Codec)?;
 
-        let (encrypted_size, tag) = session_info
-            .encrypt_secure_message(
-                associated_data,
-                &plaintext_data[..encrypted_len],
-                &mut encrypted_data,
-            )
-            .await?;
+        let (encrypted_size, tag) = session_info.encrypt_secure_message(
+            associated_data,
+            &plaintext_data[..encrypted_len],
+            &mut encrypted_data,
+        )?;
 
         let mut secure_message_len = session_id
             .encode(secure_message)
@@ -229,9 +227,9 @@ impl SessionManager {
         Ok(())
     }
 
-    pub async fn decode_secure_message(
+    pub fn decode_secure_message(
         &mut self,
-        transport: &dyn SpdmTransport,
+        transport: &dyn SpdmTransportSync,
         secure_message: &mut MessageBuf<'_>,
         app_data_buffer: &mut [u8],
     ) -> SessionResult<usize> {
@@ -279,9 +277,12 @@ impl SessionManager {
             .try_into()
             .map_err(|_| SessionError::DecodeAeadError)?;
 
-        let decrypted_size = session_info
-            .decrypt_secure_message(associated_data, encrypted_data, &mut plaintext_buffer, tag)
-            .await?;
+        let decrypted_size = session_info.decrypt_secure_message(
+            associated_data,
+            encrypted_data,
+            &mut plaintext_buffer,
+            tag,
+        )?;
 
         let mut plaintext_msg = MessageBuf::from(&mut plaintext_buffer[..decrypted_size]);
 

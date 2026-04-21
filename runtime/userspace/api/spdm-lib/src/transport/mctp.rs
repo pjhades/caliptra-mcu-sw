@@ -2,12 +2,9 @@
 
 // MCTP Transport Implementation
 
-extern crate alloc;
 use crate::codec::MessageBuf;
 use crate::codec::{Codec, CommonCodec, DataKind};
-use crate::transport::common::{SpdmTransport, TransportError, TransportResult};
-use alloc::boxed::Box;
-use async_trait::async_trait;
+use crate::transport::common::{SpdmTransportSync, TransportError, TransportResult};
 use bitfield::bitfield;
 use caliptra_mcu_libsyscall_caliptra::mctp::{Mctp, MessageInfo};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -72,9 +69,8 @@ impl MctpTransport {
     }
 }
 
-#[async_trait]
-impl SpdmTransport for MctpTransport {
-    async fn send_request<'a>(
+impl SpdmTransportSync for MctpTransport {
+    fn send_request<'a>(
         &mut self,
         dest_eid: u8,
         req: &mut MessageBuf<'a>,
@@ -93,8 +89,7 @@ impl SpdmTransport for MctpTransport {
 
         let tag = self
             .mctp
-            .send_request(dest_eid, req_buf)
-            .await
+            .send_request_sync(dest_eid, req_buf)
             .map_err(TransportError::DriverError)?;
 
         self.cur_req_ctx = Some(tag);
@@ -102,7 +97,7 @@ impl SpdmTransport for MctpTransport {
         Ok(())
     }
 
-    async fn receive_response<'a>(&mut self, rsp: &mut MessageBuf<'a>) -> TransportResult<bool> {
+    fn receive_response<'a>(&mut self, rsp: &mut MessageBuf<'a>) -> TransportResult<bool> {
         rsp.reset();
 
         let max_len = rsp.capacity();
@@ -111,8 +106,7 @@ impl SpdmTransport for MctpTransport {
         let rsp_buf = rsp.data_mut(max_len).map_err(TransportError::Codec)?;
         let (rsp_len, _msg_info) = if let Some(tag) = self.cur_req_ctx {
             self.mctp
-                .receive_response(rsp_buf, tag, 0)
-                .await
+                .receive_response_sync(rsp_buf, tag, 0)
                 .map_err(TransportError::DriverError)
         } else {
             Err(TransportError::ResponseNotExpected)
@@ -143,7 +137,7 @@ impl SpdmTransport for MctpTransport {
         Ok(false)
     }
 
-    async fn receive_request<'a>(&mut self, req: &mut MessageBuf<'a>) -> TransportResult<bool> {
+    fn receive_request<'a>(&mut self, req: &mut MessageBuf<'a>) -> TransportResult<bool> {
         req.reset();
 
         let max_len = req.capacity();
@@ -153,8 +147,7 @@ impl SpdmTransport for MctpTransport {
 
         let (req_len, msg_info) = self
             .mctp
-            .receive_request(data_buf)
-            .await
+            .receive_request_sync(data_buf)
             .map_err(TransportError::DriverError)?;
 
         if req_len == 0 {
@@ -181,7 +174,7 @@ impl SpdmTransport for MctpTransport {
         Ok(false)
     }
 
-    async fn send_response<'a>(
+    fn send_response<'a>(
         &mut self,
         resp: &mut MessageBuf<'a>,
         _secure: bool,
@@ -198,8 +191,7 @@ impl SpdmTransport for MctpTransport {
 
         if let Some(msg_info) = self.cur_resp_ctx.clone() {
             self.mctp
-                .send_response(rsp_buf, msg_info)
-                .await
+                .send_response_sync(rsp_buf, msg_info)
                 .map_err(TransportError::DriverError)?
         } else {
             Err(TransportError::NoRequestInFlight)?;

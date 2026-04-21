@@ -55,16 +55,15 @@ impl FinishRspBase {
     }
 }
 
-async fn verify_requester_verify_data(
+fn verify_requester_verify_data(
     ctx: &mut SpdmContext<'_>,
     session_id: u32,
     requester_verify_data: &[u8; SHA384_HASH_SIZE],
     req_payload: &mut MessageBuf<'_>,
 ) -> CommandResult<()> {
     // Compute transcript hash for generating the HMAC
-    let hmac_transcript_hash = ctx
-        .transcript_hash(TranscriptContext::Th, Some(session_id), false)
-        .await?;
+    let hmac_transcript_hash =
+        ctx.transcript_hash(TranscriptContext::Th, Some(session_id), false)?;
 
     let session_info = ctx
         .session_mgr
@@ -73,7 +72,6 @@ async fn verify_requester_verify_data(
 
     let computed_hmac = session_info
         .compute_hmac(SessionKeyType::RequestFinishedKey, &hmac_transcript_hash)
-        .await
         .map_err(|e| (false, CommandError::Session(e)))?;
 
     if !constant_time_eq(&computed_hmac, requester_verify_data) {
@@ -83,7 +81,7 @@ async fn verify_requester_verify_data(
     Ok(())
 }
 
-async fn process_finish<'a>(
+fn process_finish<'a>(
     ctx: &mut SpdmContext<'a>,
     session_id: u32,
     spdm_hdr: SpdmMsgHdr,
@@ -99,8 +97,7 @@ async fn process_finish<'a>(
     ctx.reset_transcript_via_req_code(ReqRespCode::Finish);
 
     // Append FINISH req (excluding RequesterVerifyData) to TH transcript.
-    ctx.append_message_to_transcript(req_payload, TranscriptContext::Th, Some(session_id))
-        .await?;
+    ctx.append_message_to_transcript(req_payload, TranscriptContext::Th, Some(session_id))?;
 
     // Verify HMAC of the RequesterVerifyData
     let mut requester_verify_data = [0u8; SHA384_HASH_SIZE];
@@ -108,7 +105,7 @@ async fn process_finish<'a>(
         .map_err(|e| (false, CommandError::Codec(e)))?;
 
     // Verify the RequesterVerifyData
-    verify_requester_verify_data(ctx, session_id, &requester_verify_data, req_payload).await?;
+    verify_requester_verify_data(ctx, session_id, &requester_verify_data, req_payload)?;
 
     // Add the RequesterVerifyData to the transcript
     ctx.append_slice_to_transcript(
@@ -116,17 +113,15 @@ async fn process_finish<'a>(
         TranscriptContext::Th,
         Some(session_id),
     )
-    .await
 }
 
-async fn encode_responder_verify_data(
+fn encode_responder_verify_data(
     ctx: &mut SpdmContext<'_>,
     session_id: u32,
     rsp: &mut MessageBuf<'_>,
 ) -> CommandResult<usize> {
-    let hmac_transcript_hash = ctx
-        .transcript_hash(TranscriptContext::Th, Some(session_id), false)
-        .await?;
+    let hmac_transcript_hash =
+        ctx.transcript_hash(TranscriptContext::Th, Some(session_id), false)?;
 
     let session_info = ctx
         .session_mgr
@@ -135,7 +130,6 @@ async fn encode_responder_verify_data(
 
     let responder_verify_data = session_info
         .compute_hmac(SessionKeyType::ResponseFinishedKey, &hmac_transcript_hash)
-        .await
         .map_err(|e| (false, CommandError::Session(e)))?;
 
     let len = encode_u8_slice(&responder_verify_data, rsp)
@@ -146,13 +140,12 @@ async fn encode_responder_verify_data(
         &responder_verify_data,
         TranscriptContext::Th,
         Some(session_id),
-    )
-    .await?;
+    )?;
 
     Ok(len)
 }
 
-async fn generate_finish_response<'a>(
+fn generate_finish_response<'a>(
     ctx: &mut SpdmContext<'a>,
     session_id: u32,
     rsp: &mut MessageBuf<'a>,
@@ -170,19 +163,16 @@ async fn generate_finish_response<'a>(
         .encode(rsp)
         .map_err(|e| (false, CommandError::Codec(e)))?;
 
-    ctx.append_message_to_transcript(rsp, TranscriptContext::Th, Some(session_id))
-        .await?;
+    ctx.append_message_to_transcript(rsp, TranscriptContext::Th, Some(session_id))?;
 
     // Only generate and encode ResponderVerifyData if the session is in the clear
     // This will also add the ResponderVerifyData to the transcript
     if ctx.state.connection_info.handshake_in_the_clear() {
-        payload_len += encode_responder_verify_data(ctx, session_id, rsp).await?;
+        payload_len += encode_responder_verify_data(ctx, session_id, rsp)?;
     }
 
     // Geneate session data key
-    let th2_transcript_hash = ctx
-        .transcript_hash(TranscriptContext::Th, Some(session_id), true)
-        .await?;
+    let th2_transcript_hash = ctx.transcript_hash(TranscriptContext::Th, Some(session_id), true)?;
 
     let session_info = ctx
         .session_mgr
@@ -191,14 +181,13 @@ async fn generate_finish_response<'a>(
 
     session_info
         .generate_session_data_key(&th2_transcript_hash)
-        .await
         .map_err(|e| (false, CommandError::Session(e)))?;
 
     rsp.push_data(payload_len)
         .map_err(|e| (false, CommandError::Codec(e)))
 }
 
-pub(crate) async fn handle_finish<'a>(
+pub(crate) fn handle_finish<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -241,11 +230,11 @@ pub(crate) async fn handle_finish<'a>(
     ctx.validate_negotiated_hash_algo(req_payload)?;
 
     // Process FINISH request
-    process_finish(ctx, session_id, spdm_hdr, req_payload).await?;
+    process_finish(ctx, session_id, spdm_hdr, req_payload)?;
 
     // Generate FINISH response
     ctx.prepare_response_buffer(req_payload)?;
-    generate_finish_response(ctx, session_id, req_payload).await?;
+    generate_finish_response(ctx, session_id, req_payload)?;
 
     // Set the session state to Establishing
     ctx.session_mgr

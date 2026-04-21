@@ -94,7 +94,7 @@ pub(crate) struct MeasurementsResponse {
 }
 
 impl MeasurementsResponse {
-    pub async fn get_chunk(
+    pub fn get_chunk(
         &self,
         measurements: &mut SpdmMeasurements<'_>,
         shared_transcript: &mut Transcript,
@@ -104,7 +104,7 @@ impl MeasurementsResponse {
         mut session_info: Option<&mut SessionInfo>,
     ) -> CommandResult<usize> {
         // Calculate the size of the response
-        let response_size = self.response_size(measurements).await?;
+        let response_size = self.response_size(measurements)?;
 
         // Check if the offset is valid
         if offset >= response_size {
@@ -118,13 +118,12 @@ impl MeasurementsResponse {
 
         let measurement_record_len = measurements
             .measurement_block_size(self.meas_op, raw_bitstream_requested)
-            .await
             .map_err(|e| (false, CommandError::Measurement(e)))?;
 
         let record_start = RESPONSE_FIXED_FIELDS_SIZE;
         let record_end = record_start + measurement_record_len;
         let trailer_start = record_end;
-        let (variable_fields, trailer_len) = self.response_variable_fields().await?;
+        let (variable_fields, trailer_len) = self.response_variable_fields()?;
         let signature_start = trailer_start + trailer_len;
 
         // If signature is requested, avoid splitting it across chunks.
@@ -143,7 +142,7 @@ impl MeasurementsResponse {
 
         // 1. Copy from the fixed response fields
         if offset < RESPONSE_FIXED_FIELDS_SIZE {
-            let fixed_fields = self.response_fixed_fields(measurements).await?;
+            let fixed_fields = self.response_fixed_fields(measurements)?;
             let start = offset;
             let end = (RESPONSE_FIXED_FIELDS_SIZE).min(start + rem_len);
             let copy_len = end - start;
@@ -163,7 +162,6 @@ impl MeasurementsResponse {
                     meas_block_offset,
                     &mut chunk_buf[copied..copied + bytes_to_copy],
                 )
-                .await
                 .map_err(|e| (false, CommandError::Measurement(e)))?;
             copied += bytes_filled;
             rem_len -= bytes_filled;
@@ -189,7 +187,6 @@ impl MeasurementsResponse {
                 session_info.as_deref_mut(),
                 &chunk_buf[..copied],
             )
-            .await
             .map_err(|e| (false, CommandError::Transcript(e)))?;
 
         // 4. Copy from the signature if requested.
@@ -199,9 +196,8 @@ impl MeasurementsResponse {
             && self.req_attr.signature_requested() == 1
             && offset + copied >= signature_start
         {
-            let signature = self
-                .l1_signature(self.asym_algo, shared_transcript, session_info, cert_store)
-                .await?;
+            let signature =
+                self.l1_signature(self.asym_algo, shared_transcript, session_info, cert_store)?;
 
             let sig_offset = (offset + copied) - signature_start;
             let copy_len = (ECC_P384_SIGNATURE_SIZE - sig_offset).min(rem_len);
@@ -213,26 +209,23 @@ impl MeasurementsResponse {
         Ok(copied)
     }
 
-    async fn response_fixed_fields(
+    fn response_fixed_fields(
         &self,
         measurements: &mut SpdmMeasurements<'_>,
     ) -> CommandResult<[u8; RESPONSE_FIXED_FIELDS_SIZE]> {
         let mut fixed_rsp_fields = [0u8; RESPONSE_FIXED_FIELDS_SIZE];
         let mut fixed_rsp_buf = MessageBuf::new(&mut fixed_rsp_fields);
-        _ = self
-            .encode_response_fixed_fields(&mut fixed_rsp_buf, measurements)
-            .await?;
+        _ = self.encode_response_fixed_fields(&mut fixed_rsp_buf, measurements)?;
         Ok(fixed_rsp_fields)
     }
 
-    async fn encode_response_fixed_fields(
+    fn encode_response_fixed_fields(
         &self,
         buf: &mut MessageBuf<'_>,
         measurements: &mut SpdmMeasurements<'_>,
     ) -> CommandResult<usize> {
         let measurement_record_size = measurements
             .measurement_block_size(self.meas_op, self.req_attr.raw_bitstream_requested() == 1)
-            .await
             .map_err(|e| (false, CommandError::Measurement(e)))?;
         let total_measurement_count = measurements.total_measurement_count() as u8;
 
@@ -273,25 +266,19 @@ impl MeasurementsResponse {
         Ok(len)
     }
 
-    async fn response_variable_fields(
+    fn response_variable_fields(
         &self,
     ) -> CommandResult<([u8; MAX_RESPONSE_VARIABLE_FIELDS_SIZE], usize)> {
         let mut trailer_rsp = [0u8; MAX_RESPONSE_VARIABLE_FIELDS_SIZE];
         let mut trailer_buf = MessageBuf::new(&mut trailer_rsp);
-        let len = self
-            .encode_response_variable_fields(&mut trailer_buf)
-            .await?;
+        let len = self.encode_response_variable_fields(&mut trailer_buf)?;
         Ok((trailer_rsp, len))
     }
 
-    async fn encode_response_variable_fields(
-        &self,
-        buf: &mut MessageBuf<'_>,
-    ) -> CommandResult<usize> {
+    fn encode_response_variable_fields(&self, buf: &mut MessageBuf<'_>) -> CommandResult<usize> {
         // Encode the nonce
         let mut nonce = [0u8; SPDM_NONCE_LEN];
         Rng::generate_random_number(&mut nonce)
-            .await
             .map_err(|e| (false, CommandError::CaliptraApi(e)))?;
         let mut len = encode_u8_slice(&nonce, buf).map_err(|e| (false, CommandError::Codec(e)))?;
 
@@ -311,7 +298,7 @@ impl MeasurementsResponse {
         Ok(len)
     }
 
-    async fn l1_signature(
+    fn l1_signature(
         &self,
         asym_algo: AsymAlgo,
         transcript: &mut Transcript,
@@ -320,20 +307,18 @@ impl MeasurementsResponse {
     ) -> CommandResult<[u8; ECC_P384_SIGNATURE_SIZE]> {
         let mut signature = [0u8; ECC_P384_SIGNATURE_SIZE];
         let mut signature_buf = MessageBuf::new(&mut signature);
-        let _ = self
-            .encode_l1_signature(
-                asym_algo,
-                transcript,
-                session_info,
-                cert_store,
-                &mut signature_buf,
-            )
-            .await?;
+        let _ = self.encode_l1_signature(
+            asym_algo,
+            transcript,
+            session_info,
+            cert_store,
+            &mut signature_buf,
+        )?;
 
         Ok(signature)
     }
 
-    async fn encode_l1_signature(
+    fn encode_l1_signature(
         &self,
         asym_algo: AsymAlgo,
         transcript: &mut Transcript,
@@ -351,7 +336,6 @@ impl MeasurementsResponse {
                 &mut l1_transcript_hash,
                 true,
             )
-            .await
             .map_err(|e| (false, CommandError::Transcript(e)))?;
 
         // Get TBS via response code
@@ -360,7 +344,6 @@ impl MeasurementsResponse {
             ReqRespCode::Measurements,
             l1_transcript_hash,
         )
-        .await
         .map_err(|e| (false, CommandError::SignCtx(e)))?;
 
         let slot_id = self.slot_id.ok_or((
@@ -371,7 +354,6 @@ impl MeasurementsResponse {
         let mut signature = [0u8; ECC_P384_SIGNATURE_SIZE];
         cert_store
             .sign_hash(slot_id, asym_algo, &tbs, &mut signature)
-            .await
             .map_err(|e| (false, CommandError::CertStore(e)))?;
 
         buf.put_data(signature.len())
@@ -386,7 +368,7 @@ impl MeasurementsResponse {
         Ok(signature.len())
     }
 
-    async fn response_size(&self, measurements: &mut SpdmMeasurements<'_>) -> CommandResult<usize> {
+    fn response_size(&self, measurements: &mut SpdmMeasurements<'_>) -> CommandResult<usize> {
         // Calculate the size of the response based on the request attributes
         let mut rsp_size = RESPONSE_FIXED_FIELDS_SIZE;
 
@@ -394,7 +376,6 @@ impl MeasurementsResponse {
             // return the size of a measurement block or all measurement blocks
             rsp_size += measurements
                 .measurement_block_size(self.meas_op, false)
-                .await
                 .map_err(|e| (false, CommandError::Measurement(e)))?;
         };
 
@@ -416,7 +397,7 @@ impl MeasurementsResponse {
     }
 }
 
-async fn process_get_measurements<'a>(
+fn process_get_measurements<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -469,8 +450,7 @@ async fn process_get_measurements<'a>(
     let session_id = ctx.session_mgr.active_session_id();
 
     // Append the request to the transcript (TODO: check session_info)
-    ctx.append_message_to_transcript(req_payload, TranscriptContext::L1, session_id)
-        .await?;
+    ctx.append_message_to_transcript(req_payload, TranscriptContext::L1, session_id)?;
 
     let asym_algo = ctx.validate_negotiated_base_asym_algo(req_payload)?;
 
@@ -486,12 +466,12 @@ async fn process_get_measurements<'a>(
     Ok(get_meas_req_context)
 }
 
-pub(crate) async fn generate_measurements_response<'a>(
+pub(crate) fn generate_measurements_response<'a>(
     ctx: &mut SpdmContext<'a>,
     rsp_ctx: MeasurementsResponse,
     rsp: &mut MessageBuf<'a>,
 ) -> CommandResult<()> {
-    let rsp_len = match rsp_ctx.response_size(&mut ctx.measurements).await {
+    let rsp_len = match rsp_ctx.response_size(&mut ctx.measurements) {
         Ok(len) => len,
         Err((_, CommandError::Measurement(MeasurementsError::InvalidIndex))) => {
             Err(ctx.generate_error_response(rsp, ErrorCode::InvalidRequest, 0, None))?
@@ -520,16 +500,14 @@ pub(crate) async fn generate_measurements_response<'a>(
         let rsp_buf = rsp
             .data_mut(rsp_len)
             .map_err(|e| (false, CommandError::Codec(e)))?;
-        let payload_len = rsp_ctx
-            .get_chunk(
-                &mut ctx.measurements,
-                &mut ctx.shared_transcript,
-                ctx.device_certs_store,
-                0,
-                rsp_buf,
-                session_info,
-            )
-            .await?;
+        let payload_len = rsp_ctx.get_chunk(
+            &mut ctx.measurements,
+            &mut ctx.shared_transcript,
+            ctx.device_certs_store,
+            0,
+            rsp_buf,
+            session_info,
+        )?;
         if rsp_len != payload_len {
             Err((
                 false,
@@ -544,7 +522,7 @@ pub(crate) async fn generate_measurements_response<'a>(
     }
 }
 
-pub(crate) async fn handle_get_measurements<'a>(
+pub(crate) fn handle_get_measurements<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -572,10 +550,10 @@ pub(crate) async fn handle_get_measurements<'a>(
     ctx.validate_negotiated_hash_algo(req_payload)?;
 
     // Process GET_MEASUREMENTS request
-    let rsp_ctx = process_get_measurements(ctx, spdm_hdr, req_payload).await?;
+    let rsp_ctx = process_get_measurements(ctx, spdm_hdr, req_payload)?;
 
     // Generate MEASUREMENTS response
     ctx.prepare_response_buffer(req_payload)?;
-    generate_measurements_response(ctx, rsp_ctx, req_payload).await?;
+    generate_measurements_response(ctx, rsp_ctx, req_payload)?;
     Ok(())
 }

@@ -18,7 +18,7 @@ use crate::protocol::DeviceCapabilities;
 use crate::session::{SessionManager, SessionState};
 use crate::state::{ConnectionState, State};
 use crate::transcript::{Transcript, TranscriptContext};
-use crate::transport::common::SpdmTransport;
+use crate::transport::common::SpdmTransportSync;
 use crate::vdm_handler::VdmHandler;
 use caliptra_mcu_libapi_caliptra::crypto::aes_gcm::Aes256GcmTag;
 use caliptra_mcu_libapi_caliptra::crypto::asym::*;
@@ -29,7 +29,7 @@ use core::mem::size_of;
 pub const MAX_SPDM_RESPONDER_BUF_SIZE: usize = 1024;
 
 pub struct SpdmContext<'a> {
-    transport: &'a mut dyn SpdmTransport,
+    transport: &'a mut dyn SpdmTransportSync,
     pub(crate) supported_versions: &'a [SpdmVersion],
     pub(crate) supported_secure_versions: &'a [SpdmVersion],
     pub(crate) state: State,
@@ -48,7 +48,7 @@ impl<'a> SpdmContext<'a> {
     pub fn new(
         supported_versions: &'a [SpdmVersion],
         supported_secure_versions: &'a [SpdmVersion],
-        spdm_transport: &'a mut dyn SpdmTransport,
+        spdm_transport: &'a mut dyn SpdmTransportSync,
         local_capabilities: DeviceCapabilities,
         local_algorithms: LocalDeviceAlgorithms<'a>,
         device_certs_store: &'a dyn SpdmCertStore,
@@ -75,11 +75,10 @@ impl<'a> SpdmContext<'a> {
         })
     }
 
-    pub async fn process_message(&mut self, msg_buf: &mut MessageBuf<'a>) -> SpdmResult<()> {
+    pub fn process_message(&mut self, msg_buf: &mut MessageBuf<'a>) -> SpdmResult<()> {
         let secure = self
             .transport
             .receive_request(msg_buf)
-            .await
             .map_err(SpdmError::Transport)?;
 
         // Reset active session_id
@@ -91,7 +90,6 @@ impl<'a> SpdmContext<'a> {
             let app_data_len = self
                 .session_mgr
                 .decode_secure_message(self.transport, msg_buf, &mut app_data)
-                .await
                 .map_err(SpdmError::Session)?;
 
             // Replace msg_buf contents with the decrypted application data
@@ -103,15 +101,13 @@ impl<'a> SpdmContext<'a> {
         }
 
         // Process message
-        match self.handle_request(msg_buf).await {
+        match self.handle_request(msg_buf) {
             Ok(()) => {
-                self.send_response(msg_buf, secure).await?;
+                self.send_response(msg_buf, secure)?;
             }
             Err((rsp, command_error)) => {
                 if rsp {
-                    self.send_response(msg_buf, secure)
-                        .await
-                        .inspect_err(|_| {})?;
+                    self.send_response(msg_buf, secure).inspect_err(|_| {})?;
                 }
                 Err(SpdmError::Command(command_error))?;
             }
@@ -120,7 +116,7 @@ impl<'a> SpdmContext<'a> {
         Ok(())
     }
 
-    async fn handle_request(&mut self, buf: &mut MessageBuf<'a>) -> CommandResult<()> {
+    fn handle_request(&mut self, buf: &mut MessageBuf<'a>) -> CommandResult<()> {
         let req = buf;
 
         let req_msg_header: SpdmMsgHdr =
@@ -139,46 +135,40 @@ impl<'a> SpdmContext<'a> {
         self.validate_request_in_session_context(req_code, req)?;
 
         match req_code {
-            ReqRespCode::GetVersion => {
-                version_rsp::handle_get_version(self, req_msg_header, req).await?
-            }
+            ReqRespCode::GetVersion => version_rsp::handle_get_version(self, req_msg_header, req)?,
             ReqRespCode::GetCapabilities => {
-                capabilities_rsp::handle_get_capabilities(self, req_msg_header, req).await?
+                capabilities_rsp::handle_get_capabilities(self, req_msg_header, req)?
             }
             ReqRespCode::NegotiateAlgorithms => {
-                algorithms_rsp::handle_negotiate_algorithms(self, req_msg_header, req).await?
+                algorithms_rsp::handle_negotiate_algorithms(self, req_msg_header, req)?
             }
-            ReqRespCode::GetDigests => {
-                digests_rsp::handle_get_digests(self, req_msg_header, req).await?
-            }
+            ReqRespCode::GetDigests => digests_rsp::handle_get_digests(self, req_msg_header, req)?,
             ReqRespCode::GetCertificate => {
-                certificate_rsp::handle_get_certificate(self, req_msg_header, req).await?
+                certificate_rsp::handle_get_certificate(self, req_msg_header, req)?
             }
             ReqRespCode::Challenge => {
-                challenge_auth_rsp::handle_challenge(self, req_msg_header, req).await?
+                challenge_auth_rsp::handle_challenge(self, req_msg_header, req)?
             }
             ReqRespCode::GetMeasurements => {
-                measurements_rsp::handle_get_measurements(self, req_msg_header, req).await?
+                measurements_rsp::handle_get_measurements(self, req_msg_header, req)?
             }
-            ReqRespCode::ChunkGet => {
-                chunk_get_rsp::handle_chunk_get(self, req_msg_header, req).await?
-            }
+            ReqRespCode::ChunkGet => chunk_get_rsp::handle_chunk_get(self, req_msg_header, req)?,
             ReqRespCode::KeyExchange => {
-                key_exchange_rsp::handle_key_exchange(self, req_msg_header, req).await?
+                key_exchange_rsp::handle_key_exchange(self, req_msg_header, req)?
             }
-            ReqRespCode::Finish => finish_rsp::handle_finish(self, req_msg_header, req).await?,
+            ReqRespCode::Finish => finish_rsp::handle_finish(self, req_msg_header, req)?,
             ReqRespCode::EndSession => {
-                end_session_ack_rsp::handle_end_session(self, req_msg_header, req).await?
+                end_session_ack_rsp::handle_end_session(self, req_msg_header, req)?
             }
             ReqRespCode::VendorDefinedRequest => {
-                vendor_defined_rsp::handle_vendor_defined_request(self, req_msg_header, req).await?
+                vendor_defined_rsp::handle_vendor_defined_request(self, req_msg_header, req)?
             }
             _ => Err((false, CommandError::UnsupportedRequest))?,
         }
         Ok(())
     }
 
-    async fn send_response(&mut self, resp: &mut MessageBuf<'a>, secure: bool) -> SpdmResult<()> {
+    fn send_response(&mut self, resp: &mut MessageBuf<'a>, secure: bool) -> SpdmResult<()> {
         if secure {
             let mut secure_message = [0u8; MAX_SPDM_RESPONDER_BUF_SIZE];
             let mut secure_message_buf = MessageBuf::new(&mut secure_message);
@@ -189,17 +179,14 @@ impl<'a> SpdmContext<'a> {
                 .map_err(|_| SpdmError::BufferTooSmall)?;
             self.session_mgr
                 .encode_secure_message(self.transport, app_data, &mut secure_message_buf)
-                .await
                 .map_err(SpdmError::Session)?;
             self.transport
                 .send_response(&mut secure_message_buf, secure)
-                .await
                 .map_err(SpdmError::Transport)
         } else {
             // Send response without encryption
             self.transport
                 .send_response(resp, secure)
-                .await
                 .map_err(SpdmError::Transport)
         }
     }
@@ -299,7 +286,7 @@ impl<'a> SpdmContext<'a> {
         }
     }
 
-    pub(crate) async fn append_message_to_transcript(
+    pub(crate) fn append_message_to_transcript(
         &mut self,
         msg_buf: &mut MessageBuf<'_>,
         transcript_context: TranscriptContext,
@@ -312,10 +299,9 @@ impl<'a> SpdmContext<'a> {
             .map_err(|e| (false, CommandError::Codec(e)))?;
 
         self.append_slice_to_transcript(msg, transcript_context, session_id)
-            .await
     }
 
-    pub(crate) async fn append_slice_to_transcript(
+    pub(crate) fn append_slice_to_transcript(
         &mut self,
         data: &[u8],
         transcript_context: TranscriptContext,
@@ -333,11 +319,10 @@ impl<'a> SpdmContext<'a> {
 
         self.shared_transcript
             .append(transcript_context, session_info, data)
-            .await
             .map_err(|e| (false, CommandError::Transcript(e)))
     }
 
-    pub(crate) async fn transcript_hash(
+    pub(crate) fn transcript_hash(
         &mut self,
         transcript_context: TranscriptContext,
         session_id: Option<u32>,
@@ -361,7 +346,6 @@ impl<'a> SpdmContext<'a> {
                 &mut transcript_hash,
                 finish_hash,
             )
-            .await
             .map_err(|e| (false, CommandError::Transcript(e)))?;
 
         Ok(transcript_hash)

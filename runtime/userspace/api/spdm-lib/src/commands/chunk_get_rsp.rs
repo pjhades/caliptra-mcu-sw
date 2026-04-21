@@ -149,7 +149,7 @@ fn encode_chunk_response_hdr(
         .map_err(|e| (false, CommandError::Codec(e)))
 }
 
-async fn encode_chunk_data(
+fn encode_chunk_data(
     ctx: &mut SpdmContext<'_>,
     chunk_size: usize,
     rsp: &mut MessageBuf<'_>,
@@ -167,14 +167,12 @@ async fn encode_chunk_data(
         match response {
             LargeResponse::Certificate(cert_rsp) => {
                 // Get the chunk data from the certificate response
-                cert_rsp
-                    .get_chunk(
-                        &mut ctx.shared_transcript,
-                        ctx.device_certs_store,
-                        offset,
-                        chunk_buf,
-                    )
-                    .await?
+                cert_rsp.get_chunk(
+                    &mut ctx.shared_transcript,
+                    ctx.device_certs_store,
+                    offset,
+                    chunk_buf,
+                )?
             }
             LargeResponse::Measurements(meas_rsp) => {
                 // Get the session info for measurements chunked within a session
@@ -186,16 +184,14 @@ async fn encode_chunk_data(
                     None => None,
                 };
                 // Get the chunk data from the measurements response
-                meas_rsp
-                    .get_chunk(
-                        &mut ctx.measurements,
-                        &mut ctx.shared_transcript,
-                        ctx.device_certs_store,
-                        offset,
-                        chunk_buf,
-                        session_info,
-                    )
-                    .await?
+                meas_rsp.get_chunk(
+                    &mut ctx.measurements,
+                    &mut ctx.shared_transcript,
+                    ctx.device_certs_store,
+                    offset,
+                    chunk_buf,
+                    session_info,
+                )?
             }
             LargeResponse::Vdm(_vdm_rsp) => {
                 todo!("implement chunking logic for VDM response")
@@ -220,7 +216,7 @@ async fn encode_chunk_data(
     Ok(bytes_copied)
 }
 
-async fn generate_chunk_response<'a>(
+fn generate_chunk_response<'a>(
     ctx: &mut SpdmContext<'a>,
     handle: u8,
     chunk_seq_num: u16,
@@ -243,7 +239,7 @@ async fn generate_chunk_response<'a>(
     }
 
     // Encode chunk data first (as payload) to determine actual bytes copied
-    let actual_chunk_size = encode_chunk_data(ctx, chunk_size, rsp).await?;
+    let actual_chunk_size = encode_chunk_data(ctx, chunk_size, rsp)?;
 
     // Mark this chunk as sent with actual bytes transferred
     ctx.large_resp_context.next_chunk_sent(actual_chunk_size);
@@ -273,7 +269,7 @@ async fn generate_chunk_response<'a>(
     Ok(())
 }
 
-pub(crate) async fn handle_chunk_get<'a>(
+pub(crate) fn handle_chunk_get<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -300,7 +296,7 @@ pub(crate) async fn handle_chunk_get<'a>(
 
     // Generate CHUNK_RESPONSE response
     ctx.prepare_response_buffer(req_payload)?;
-    generate_chunk_response(ctx, handle, chunk_seq_num, req_payload).await?;
+    generate_chunk_response(ctx, handle, chunk_seq_num, req_payload)?;
 
     Ok(())
 }

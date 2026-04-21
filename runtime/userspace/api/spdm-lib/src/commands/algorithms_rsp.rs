@@ -156,7 +156,7 @@ pub(crate) fn selected_measurement_specification(ctx: &SpdmContext) -> Measureme
     measurement_specification_sel
 }
 
-async fn process_negotiate_algorithms_request<'a>(
+fn process_negotiate_algorithms_request<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -278,10 +278,9 @@ async fn process_negotiate_algorithms_request<'a>(
 
     // Append NEGOTIATE_ALGORITHMS to the transcript VCA context
     ctx.append_message_to_transcript(req_payload, TranscriptContext::Vca, None)
-        .await
 }
 
-async fn generate_algorithms_response<'a>(
+fn generate_algorithms_response<'a>(
     ctx: &mut SpdmContext<'a>,
     rsp: &mut MessageBuf<'a>,
 ) -> CommandResult<()> {
@@ -368,8 +367,7 @@ async fn generate_algorithms_response<'a>(
     payload_len += encode_alg_struct_table(ctx, rsp, num_alg_struct_tables)?;
 
     // Add the ALGORITHMS to the transcript VCA context
-    ctx.append_message_to_transcript(rsp, TranscriptContext::Vca, None)
-        .await?;
+    ctx.append_message_to_transcript(rsp, TranscriptContext::Vca, None)?;
 
     rsp.push_data(payload_len)
         .map_err(|_| ctx.generate_error_response(rsp, ErrorCode::InvalidRequest, 0, None))?;
@@ -468,7 +466,7 @@ fn encode_alg_struct_table(
     Ok(len)
 }
 
-pub(crate) async fn handle_negotiate_algorithms<'a>(
+pub(crate) fn handle_negotiate_algorithms<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -479,11 +477,11 @@ pub(crate) async fn handle_negotiate_algorithms<'a>(
     }
 
     // Process NEGOTIATE_ALGORITHMS request
-    process_negotiate_algorithms_request(ctx, spdm_hdr, req_payload).await?;
+    process_negotiate_algorithms_request(ctx, spdm_hdr, req_payload)?;
 
     // Generate ALGORITHMS response
     ctx.prepare_response_buffer(req_payload)?;
-    generate_algorithms_response(ctx, req_payload).await?;
+    generate_algorithms_response(ctx, req_payload)?;
 
     // Set the negotiated asymmetric algorithm in the measurements module
     let asym_algo = ctx.validate_negotiated_base_asym_algo(req_payload)?;

@@ -34,6 +34,28 @@ pub trait SpdmTransport {
     }
 }
 
+// TODO: We keep the original async trait due to the existence of multiple transport types.
+pub trait SpdmTransportSync {
+    fn send_request<'a>(
+        &mut self,
+        dest_eid: u8,
+        req: &mut MessageBuf<'a>,
+        secure: Option<bool>,
+    ) -> TransportResult<()>;
+    fn receive_response<'a>(&mut self, rsp: &mut MessageBuf<'a>) -> TransportResult<bool>;
+    fn receive_request<'a>(&mut self, req: &mut MessageBuf<'a>) -> TransportResult<bool>;
+    fn send_response<'a>(&mut self, resp: &mut MessageBuf<'a>, secure: bool)
+        -> TransportResult<()>;
+    fn max_message_size(&self) -> TransportResult<usize>;
+    fn header_size(&self) -> usize;
+    fn sequence_num_size_bytes(&self) -> usize {
+        0 // No secure message sequence number by default
+    }
+    fn random_data_size_bytes(&self) -> usize {
+        0 // No secure message random data by default
+    }
+}
+
 #[derive(Debug)]
 pub enum TransportError {
     DriverError(ErrorCode),

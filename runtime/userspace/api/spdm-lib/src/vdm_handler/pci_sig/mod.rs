@@ -1,14 +1,10 @@
 // Licensed under the Apache-2.0 license
 
-extern crate alloc;
-
 use crate::codec::{Codec, CommonCodec, DataKind, MessageBuf};
 use crate::protocol::*;
 use crate::vdm_handler::{
     VdmError, VdmHandler, VdmProtocolHandler, VdmRegistryMatcher, VdmResponder, VdmResult,
 };
-use alloc::boxed::Box;
-use async_trait::async_trait;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 pub mod ide_km;
@@ -57,9 +53,8 @@ impl<'a> PciSigCmdHandler<'a> {
     }
 }
 
-#[async_trait]
 impl VdmResponder for PciSigCmdHandler<'_> {
-    async fn handle_request(
+    fn handle_request(
         &mut self,
         req_buf: &mut MessageBuf<'_>,
         rsp_buf: &mut MessageBuf<'_>,
@@ -71,7 +66,7 @@ impl VdmResponder for PciSigCmdHandler<'_> {
         for handler in self.protocol_handlers.iter_mut().flatten() {
             if handler.match_protocol(protocol_id) {
                 rsp_buf.reserve(hdr_len).map_err(VdmError::Codec)?;
-                let mut len = handler.handle_request(req_buf, rsp_buf).await?;
+                let mut len = handler.handle_request(req_buf, rsp_buf)?;
                 let hdr = PciSigProtocolHdr { protocol_id };
                 len += hdr.encode(rsp_buf).map_err(VdmError::Codec)?;
                 return Ok(len);

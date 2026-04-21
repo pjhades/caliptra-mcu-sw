@@ -117,7 +117,7 @@ fn init_session(
     );
 }
 
-async fn process_key_exchange<'a>(
+fn process_key_exchange<'a>(
     ctx: &mut SpdmContext<'a>,
     asym_algo: AsymAlgo,
     spdm_hdr: SpdmMsgHdr,
@@ -145,21 +145,14 @@ async fn process_key_exchange<'a>(
     // Note: Pubkey of the responder will not be pre-provisioned to Requester. So slot ID 0xFF is invalid.
     if exch_req.slot_id >= MAX_CERT_SLOTS_SUPPORTED
         || ctx.local_capabilities.flags.cert_cap() == 0
-        || !ctx
-            .device_certs_store
-            .is_provisioned(exch_req.slot_id)
-            .await
+        || !ctx.device_certs_store.is_provisioned(exch_req.slot_id)
     {
         Err(ctx.generate_error_response(req_payload, ErrorCode::InvalidRequest, 0, None))?;
     }
 
     // If multi-key connection response is supported, validate the key supports key_exch usage
     if connection_version >= SpdmVersion::V13 && ctx.state.connection_info.multi_key_conn_rsp() {
-        match ctx
-            .device_certs_store
-            .key_usage_mask(exch_req.slot_id)
-            .await
-        {
+        match ctx.device_certs_store.key_usage_mask(exch_req.slot_id) {
             Some(key_usage_mask) if key_usage_mask.key_exch_usage() != 0 => {}
             _ => Err(ctx.generate_error_response(req_payload, ErrorCode::InvalidRequest, 0, None))?,
         }
@@ -211,7 +204,6 @@ async fn process_key_exchange<'a>(
 
     let resp_exch_data = session_info
         .compute_dhe_secret(&exch_req.exchange_data)
-        .await
         .map_err(|e| (false, CommandError::Session(e)))?;
 
     // Reset the transcript for the GET_MEASUREMENTS request
@@ -225,16 +217,13 @@ async fn process_key_exchange<'a>(
         asym_algo,
         &mut cert_chain_hash,
     )
-    .await
     .map_err(|e| (false, CommandError::CertStore(e)))?;
 
     // Update transcript
     // Hash of the cert chain in DER format
     // KEY_EXCHANGE request
-    ctx.append_slice_to_transcript(&cert_chain_hash, TranscriptContext::Th, Some(session_id))
-        .await?;
-    ctx.append_message_to_transcript(req_payload, TranscriptContext::Th, Some(session_id))
-        .await?;
+    ctx.append_slice_to_transcript(&cert_chain_hash, TranscriptContext::Th, Some(session_id))?;
+    ctx.append_message_to_transcript(req_payload, TranscriptContext::Th, Some(session_id))?;
 
     Ok(KeyExchRspContext {
         meas_summary_hash_type: exch_req.meas_summary_hash_type,
@@ -246,7 +235,7 @@ async fn process_key_exchange<'a>(
     })
 }
 
-async fn encode_key_exchange_rsp_base(
+fn encode_key_exchange_rsp_base(
     resp_session_id: u16,
     resp_exchange_data: [u8; CMB_ECDH_EXCHANGE_DATA_MAX_SIZE],
     rsp: &mut MessageBuf<'_>,
@@ -259,7 +248,6 @@ async fn encode_key_exchange_rsp_base(
 
     // Generate random data
     Rng::generate_random_number(&mut key_exch_rsp.random_data)
-        .await
         .map_err(|e| (false, CommandError::CaliptraApi(e)))?;
 
     // Encode the response fixed fields
@@ -268,39 +256,35 @@ async fn encode_key_exchange_rsp_base(
         .map_err(|e| (false, CommandError::Codec(e)))
 }
 
-async fn th1_signature(
+fn th1_signature(
     ctx: &mut SpdmContext<'_>,
     session_id: u32,
     slot_id: u8,
     asym_algo: AsymAlgo,
 ) -> CommandResult<[u8; ECC_P384_SIGNATURE_SIZE]> {
     let spdm_version = ctx.state.connection_info.version_number();
-    let th1_transcript_hash = ctx
-        .transcript_hash(
-            TranscriptContext::Th,
-            Some(session_id),
-            false, // Do not finish hash yet
-        )
-        .await?;
+    let th1_transcript_hash = ctx.transcript_hash(
+        TranscriptContext::Th,
+        Some(session_id),
+        false, // Do not finish hash yet
+    )?;
 
     let tbs = get_tbs_via_response_code(
         spdm_version,
         ReqRespCode::KeyExchangeRsp,
         th1_transcript_hash,
     )
-    .await
     .map_err(|e| (false, CommandError::SignCtx(e)))?;
 
     let mut signature = [0u8; ECC_P384_SIGNATURE_SIZE];
     ctx.device_certs_store
         .sign_hash(slot_id, asym_algo, &tbs, &mut signature)
-        .await
         .map_err(|e| (false, CommandError::CertStore(e)))?;
     Ok(signature)
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn generate_key_exchange_response<'a>(
+fn generate_key_exchange_response<'a>(
     ctx: &mut SpdmContext<'a>,
     asym_algo: AsymAlgo,
     key_exch_rsp_ctx: KeyExchRspContext,
@@ -319,14 +303,12 @@ async fn generate_key_exchange_response<'a>(
         key_exch_rsp_ctx.resp_session_id,
         key_exch_rsp_ctx.resp_exch_data,
         rsp,
-    )
-    .await?;
+    )?;
 
     // Get the measurement summary hash
     if key_exch_rsp_ctx.meas_summary_hash_type != 0 {
         payload_len +=
-            encode_measurement_summary_hash(ctx, key_exch_rsp_ctx.meas_summary_hash_type, rsp)
-                .await?;
+            encode_measurement_summary_hash(ctx, key_exch_rsp_ctx.meas_summary_hash_type, rsp)?;
     }
 
     let opaque_data = sm_selected_version_opaque_data(key_exch_rsp_ctx.selected_sm_version)
@@ -342,8 +324,7 @@ async fn generate_key_exchange_response<'a>(
         rsp,
         TranscriptContext::Th,
         Some(key_exch_rsp_ctx.session_id),
-    )
-    .await?;
+    )?;
 
     // Encode TH1 signature.
     let th1_sig = th1_signature(
@@ -351,8 +332,7 @@ async fn generate_key_exchange_response<'a>(
         key_exch_rsp_ctx.session_id,
         key_exch_rsp_ctx.slot_id,
         asym_algo,
-    )
-    .await?;
+    )?;
 
     payload_len += encode_u8_slice(&th1_sig, rsp).map_err(|e| (false, CommandError::Codec(e)))?;
 
@@ -361,17 +341,14 @@ async fn generate_key_exchange_response<'a>(
         &th1_sig,
         TranscriptContext::Th,
         Some(key_exch_rsp_ctx.session_id),
-    )
-    .await?;
+    )?;
 
     // Compute TH1 transcript hash for generating the session handshake key
-    let th1_transcript_hash = ctx
-        .transcript_hash(
-            TranscriptContext::Th,
-            Some(key_exch_rsp_ctx.session_id),
-            false,
-        )
-        .await?;
+    let th1_transcript_hash = ctx.transcript_hash(
+        TranscriptContext::Th,
+        Some(key_exch_rsp_ctx.session_id),
+        false,
+    )?;
 
     // generate session handshake key
     let session_info = ctx
@@ -381,7 +358,6 @@ async fn generate_key_exchange_response<'a>(
 
     session_info
         .generate_session_handshake_key(&th1_transcript_hash)
-        .await
         .map_err(|e| (false, CommandError::Session(e)))?;
 
     // Encode ResponderVerifyData if applicable
@@ -391,7 +367,6 @@ async fn generate_key_exchange_response<'a>(
         Some(
             session_info
                 .compute_hmac(SessionKeyType::ResponseFinishedKey, &th1_transcript_hash)
-                .await
                 .map_err(|e| (false, CommandError::Session(e)))?,
         )
     } else {
@@ -406,15 +381,14 @@ async fn generate_key_exchange_response<'a>(
             &responder_verify_data,
             TranscriptContext::Th,
             Some(key_exch_rsp_ctx.session_id),
-        )
-        .await?;
+        )?;
     }
 
     rsp.push_data(payload_len)
         .map_err(|e| (false, CommandError::Codec(e)))
 }
 
-pub(crate) async fn handle_key_exchange<'a>(
+pub(crate) fn handle_key_exchange<'a>(
     ctx: &mut SpdmContext<'a>,
     spdm_hdr: SpdmMsgHdr,
     req_payload: &mut MessageBuf<'a>,
@@ -446,7 +420,7 @@ pub(crate) async fn handle_key_exchange<'a>(
     let asym_algo = ctx.validate_negotiated_base_asym_algo(req_payload)?;
 
     // Process KEY_EXCHANGE request
-    let key_exch_rsp_ctx = match process_key_exchange(ctx, asym_algo, spdm_hdr, req_payload).await {
+    let key_exch_rsp_ctx = match process_key_exchange(ctx, asym_algo, spdm_hdr, req_payload) {
         Ok(result) => result,
         Err(e) => {
             if ctx.session_mgr.handshake_phase_session_id().is_some() {
@@ -463,9 +437,7 @@ pub(crate) async fn handle_key_exchange<'a>(
     let session_id = key_exch_rsp_ctx.session_id;
 
     // Generate response with automatic cleanup on error
-    if let Err(e) =
-        generate_key_exchange_response(ctx, asym_algo, key_exch_rsp_ctx, req_payload).await
-    {
+    if let Err(e) = generate_key_exchange_response(ctx, asym_algo, key_exch_rsp_ctx, req_payload) {
         // Clean up session on error
         if ctx.session_mgr.handshake_phase_session_id().is_some() {
             let _ = ctx.session_mgr.delete_session(session_id); // Ignore cleanup errors
