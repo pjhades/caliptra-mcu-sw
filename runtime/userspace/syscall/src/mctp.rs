@@ -2,9 +2,12 @@
 
 use crate::DefaultSyscalls;
 use caliptra_mcu_libtock_platform::share;
-use caliptra_mcu_libtock_platform::{DefaultConfig, ErrorCode, Syscalls};
+use caliptra_mcu_libtock_platform::{
+    DefaultConfig, ErrorCode, Syscalls, TockSubscribe as TockSubscribeSync,
+};
 use caliptra_mcu_libtockasync::TockSubscribe;
 use core::marker::PhantomData;
+use core::pin::pin;
 
 type EndpointId = u8;
 type Tag = u8;
@@ -89,6 +92,43 @@ impl<S: Syscalls> Mctp<S> {
         Ok((recv_len, info.into()))
     }
 
+    /// Receive the MCTP request.
+    /// Receives a message from any source EID. The user should use the returned MessageInfo to send a response.
+    ///
+    /// # Arguments
+    /// * `req` - The buffer to store the received request payload
+    ///
+    /// # Returns
+    /// * `(u32, MessageInfo)` - On success, returns tuple containing length of the request received and the message information containing the source EID, message tag
+    /// * `ErrorCode` - The error code on failure
+    pub fn receive_request_sync(&self, req: &mut [u8]) -> Result<(u32, MessageInfo), ErrorCode> {
+        if req.is_empty() {
+            Err(ErrorCode::Invalid)?;
+        }
+
+        let (recv_len, _, info) = share::scope::<(), _, _>(|_handle| {
+            let mut sub = pin!(TockSubscribeSync::<S>::new());
+            sub.as_mut().subscribe_allow_rw::<DefaultConfig>(
+                self.driver_num,
+                subscribe::RECEIVED_REQUEST,
+                allow_rw::READ_REQUEST,
+                req,
+            );
+
+            S::command(self.driver_num, command::RECEIVE_REQUEST, 0, 0)
+                .to_result::<(), ErrorCode>()
+                .map_err(|err| {
+                    // Cancel the subscription if the command fails
+                    sub.as_mut().cancel();
+                    err
+                })?;
+
+            sub.poll()
+        })?;
+
+        Ok((recv_len, info.into()))
+    }
+
     /// Send the MCTP response to an endpoint
     ///
     /// # Arguments
@@ -135,6 +175,53 @@ impl<S: Syscalls> Mctp<S> {
         })?
     }
 
+    /// Send the MCTP response to an endpoint
+    ///
+    /// # Arguments
+    /// * `resp` - The buffer containing the response payload
+    /// * `info` - The message information containing the destination EID, message tag which was received in `receive_request` call
+    ///
+    /// # Returns
+    /// * `()` - On success
+    /// * `ErrorCode` - The error code on failure
+    pub fn send_response_sync(&self, resp: &[u8], info: MessageInfo) -> Result<(), ErrorCode> {
+        let max_size = self.max_message_size()? as usize;
+
+        if resp.is_empty() || resp.len() > max_size {
+            Err(ErrorCode::Invalid)?;
+        }
+
+        let result = share::scope::<(), _, _>(|_handle| {
+            let mut sub = pin!(TockSubscribeSync::<S>::new());
+            sub.as_mut().subscribe_allow_ro::<DefaultConfig>(
+                self.driver_num,
+                subscribe::MESSAGE_TRANSMITTED,
+                allow_ro::MESSAGE_WRITE,
+                resp,
+            );
+
+            S::command(
+                self.driver_num,
+                command::SEND_RESPONSE,
+                info.eid as u32,
+                (info.tag & 0x7) as u32,
+            )
+            .to_result::<(), ErrorCode>()
+            .map_err(|err| {
+                // Cancel the subscribe_finish if the command fails
+                sub.as_mut().cancel();
+                err
+            })?;
+
+            sub.poll()
+        });
+
+        result.map(|(r, _, _)| match r {
+            0 => Ok(()),
+            _ => Err(r.try_into().unwrap_or(ErrorCode::Fail)),
+        })?
+    }
+
     /// Send the MCTP request to the destination EID
     /// The function returns the message tag assigned to the request by the MCTP Capsule.
     /// This tag will be used in the `receive_response` call to receive the corresponding response.
@@ -172,6 +259,52 @@ impl<S: Syscalls> Mctp<S> {
             Ok(TockSubscribe::subscribe_finish(sub))
         })?
         .await?;
+
+        let info: MessageInfo = info.into();
+
+        match result {
+            0 => Ok(info.tag),
+            _ => Err(result.try_into().unwrap_or(ErrorCode::Fail)),
+        }
+    }
+
+    /// Send the MCTP request to the destination EID
+    /// The function returns the message tag assigned to the request by the MCTP Capsule.
+    /// This tag will be used in the `receive_response` call to receive the corresponding response.
+    ///
+    /// # Arguments
+    /// * `dest_eid` - The destination EID to which the request is to be sent
+    /// * `req` - The payload to be sent in the request
+    ///
+    /// # Returns
+    /// * `Tag` - The message tag assigned to the request
+    /// * `ErrorCode` - The error code on failure
+    pub fn send_request_sync(&self, dest_eid: u8, req: &[u8]) -> Result<Tag, ErrorCode> {
+        let max_size = self.max_message_size()? as usize;
+
+        if req.is_empty() || req.len() > max_size {
+            Err(ErrorCode::Invalid)?;
+        }
+
+        let (result, _, info) = share::scope::<(), _, _>(|_handle| {
+            let mut sub = pin!(TockSubscribeSync::<S>::new());
+            sub.as_mut().subscribe_allow_ro::<DefaultConfig>(
+                self.driver_num,
+                subscribe::MESSAGE_TRANSMITTED,
+                allow_ro::MESSAGE_WRITE,
+                req,
+            );
+
+            S::command(self.driver_num, command::SEND_REQUEST, dest_eid as u32, 0)
+                .to_result::<(), ErrorCode>()
+                .map_err(|err| {
+                    // Cancel the subscription if the command fails
+                    sub.as_mut().cancel();
+                    err
+                })?;
+
+            sub.poll()
+        })?;
 
         let info: MessageInfo = info.into();
 
@@ -225,6 +358,53 @@ impl<S: Syscalls> Mctp<S> {
             Ok(TockSubscribe::subscribe_finish(sub))
         })?
         .await?;
+
+        Ok((recv_len, info.into()))
+    }
+
+    /// Receive the MCTP response from an endpoint
+    ///
+    /// # Arguments
+    /// * `resp` - The buffer to store the received response payload from the endpoint
+    /// * `tag` - The message tag to match against the response message
+    /// * `src_eid` - The source EID from which the response is expected
+    ///
+    /// # Returns
+    /// * `(u32, MessageInfo)` - On success, returns tuple containing length of the response received and the message information containing the source EID, message tag
+    /// * `ErrorCode` - The error code on failure
+    pub fn receive_response_sync(
+        &self,
+        resp: &mut [u8],
+        tag: Tag,
+        src_eid: u8,
+    ) -> Result<(u32, MessageInfo), ErrorCode> {
+        if resp.is_empty() || tag > 0x7 {
+            Err(ErrorCode::Invalid)?;
+        }
+
+        let (recv_len, _, info) = share::scope::<(), _, _>(|_handle| {
+            let mut sub = pin!(TockSubscribeSync::<S>::new());
+            sub.as_mut().subscribe_allow_rw::<DefaultConfig>(
+                self.driver_num,
+                subscribe::RECEIVED_RESPONSE,
+                allow_rw::READ_RESPONSE,
+                resp,
+            );
+            S::command(
+                self.driver_num,
+                command::RECEIVE_RESPONSE,
+                src_eid as u32,
+                tag as u32,
+            )
+            .to_result::<(), ErrorCode>()
+            .map_err(|err| {
+                // Cancel the subscription if the command fails
+                sub.as_mut().cancel();
+                err
+            })?;
+
+            sub.poll()
+        })?;
 
         Ok((recv_len, info.into()))
     }
