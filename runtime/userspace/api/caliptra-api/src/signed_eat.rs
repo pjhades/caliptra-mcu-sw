@@ -27,17 +27,13 @@ impl<'a> SignedEat<'a> {
         })
     }
 
-    pub async fn generate(
-        &self,
-        payload: &[u8],
-        eat_buffer: &mut [u8],
-    ) -> CaliptraApiResult<usize> {
+    pub fn generate(&self, payload: &[u8], eat_buffer: &mut [u8]) -> CaliptraApiResult<usize> {
         // Prepare protected header
         let protected_header = ProtectedHeader::new_es384();
 
         // Prepare unprotected header with certificate chain
         let mut ecc_cert: [u8; MAX_ECC_CERT_SIZE] = [0; MAX_ECC_CERT_SIZE];
-        let cert_size = self.get_leaf_cert(&mut ecc_cert).await?;
+        let cert_size = self.get_leaf_cert(&mut ecc_cert)?;
         let x5chain_header = CoseHeaderPair {
             key: header_params::X5CHAIN,
             value: &ecc_cert[..cert_size],
@@ -57,9 +53,7 @@ impl<'a> SignedEat<'a> {
             .map_err(CaliptraApiError::Eat)?;
 
         // Generate signature from context
-        let signature = self
-            .sign_context(&sig_context_buffer[..sig_context_len])
-            .await?;
+        let signature = self.sign_context(&sig_context_buffer[..sig_context_len])?;
 
         // Complete encoding with signature and EAT tags
         cose_sign1
@@ -68,36 +62,30 @@ impl<'a> SignedEat<'a> {
             .map_err(CaliptraApiError::Eat)
     }
 
-    async fn get_leaf_cert(&self, cert_buf: &mut [u8]) -> CaliptraApiResult<usize> {
+    fn get_leaf_cert(&self, cert_buf: &mut [u8]) -> CaliptraApiResult<usize> {
         if self.asym_algo != AsymAlgo::EccP384 {
             return Err(CaliptraApiError::AsymAlgoUnsupported);
         }
 
         let mut cert_context = CertContext::new();
-        let cert_size = cert_context
-            .certify_key(cert_buf, Some(self.leaf_cert_label), None, None)
-            .await?;
+        let cert_size =
+            cert_context.certify_key(cert_buf, Some(self.leaf_cert_label), None, None)?;
         Ok(cert_size)
     }
 
-    async fn sign_context(
-        &self,
-        sig_context: &[u8],
-    ) -> CaliptraApiResult<[u8; ECC_P384_SIGNATURE_SIZE]> {
+    fn sign_context(&self, sig_context: &[u8]) -> CaliptraApiResult<[u8; ECC_P384_SIGNATURE_SIZE]> {
         if self.asym_algo != AsymAlgo::EccP384 {
             Err(CaliptraApiError::AsymAlgoUnsupported)?;
         }
 
         // Hash the signature context
         let mut hash = [0u8; SHA384_HASH_SIZE];
-        HashContext::hash_all(HashAlgoType::SHA384, sig_context, &mut hash).await?;
+        HashContext::hash_all(HashAlgoType::SHA384, sig_context, &mut hash)?;
 
         // Sign the hash
         let mut cert_context = CertContext::new();
         let mut sig = [0u8; ECC_P384_SIGNATURE_SIZE];
-        cert_context
-            .sign(Some(self.leaf_cert_label), &hash, &mut sig)
-            .await?;
+        cert_context.sign(Some(self.leaf_cert_label), &hash, &mut sig)?;
 
         Ok(sig)
     }

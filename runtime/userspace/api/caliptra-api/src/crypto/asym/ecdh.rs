@@ -1,7 +1,7 @@
 // Licensed under the Apache-2.0 license
 
 use crate::error::CaliptraApiResult;
-use crate::mailbox_api::execute_mailbox_cmd;
+use crate::mailbox_api::execute_mailbox_cmd_sync;
 use caliptra_api::mailbox::{
     CmEcdhFinishReq, CmEcdhFinishResp, CmEcdhGenerateReq, CmEcdhGenerateResp, Cmk,
     MailboxReqHeader, Request,
@@ -15,7 +15,7 @@ pub use caliptra_api::mailbox::{CmKeyUsage, CMB_ECDH_EXCHANGE_DATA_MAX_SIZE};
 pub struct Ecdh;
 
 impl Ecdh {
-    pub async fn ecdh_generate() -> CaliptraApiResult<CmEcdhGenerateResp> {
+    pub fn ecdh_generate() -> CaliptraApiResult<CmEcdhGenerateResp> {
         let mailbox = Mailbox::new();
 
         let mut req = CmEcdhGenerateReq {
@@ -24,17 +24,16 @@ impl Ecdh {
 
         let mut rsp = CmEcdhGenerateResp::default();
         let rsp_bytes = rsp.as_mut_bytes();
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmEcdhGenerateReq::ID.0,
             req.as_mut_bytes(),
             rsp_bytes,
-        )
-        .await?;
+        )?;
         Ok(rsp)
     }
 
-    pub async fn ecdh_finish(
+    pub fn ecdh_finish(
         key_usage: CmKeyUsage,
         generate_resp: &CmEcdhGenerateResp,
         incoming_exchange_data: &[u8; CMB_ECDH_EXCHANGE_DATA_MAX_SIZE],
@@ -50,13 +49,12 @@ impl Ecdh {
 
         let mut rsp = CmEcdhFinishResp::default();
         let rsp_bytes = rsp.as_mut_bytes();
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmEcdhFinishReq::ID.0,
             req.as_mut_bytes(),
             rsp_bytes,
-        )
-        .await?;
+        )?;
         Ok(rsp.output)
     }
 }

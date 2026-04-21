@@ -1,7 +1,7 @@
 // Licensed under the Apache-2.0 license
 
 use crate::error::{CaliptraApiError, CaliptraApiResult};
-use crate::mailbox_api::execute_mailbox_cmd;
+use crate::mailbox_api::execute_mailbox_cmd_sync;
 use caliptra_api::mailbox::{
     CmAesGcmDecryptFinalReq, CmAesGcmDecryptFinalResp, CmAesGcmDecryptInitReq,
     CmAesGcmDecryptInitResp, CmAesGcmDecryptUpdateReq, CmAesGcmDecryptUpdateResp,
@@ -54,7 +54,7 @@ impl AesGcm {
     ///
     /// # Returns
     /// * Aes256GcmIv on success or error
-    pub async fn encrypt_init(&mut self, cmk: Cmk, aad: &[u8]) -> CaliptraApiResult<Aes256GcmIv> {
+    pub fn encrypt_init(&mut self, cmk: Cmk, aad: &[u8]) -> CaliptraApiResult<Aes256GcmIv> {
         let mailbox = Mailbox::new();
 
         if aad.len() > MAX_CMB_DATA_SIZE {
@@ -73,13 +73,12 @@ impl AesGcm {
 
         let resp_bytes = &mut [0u8; size_of::<CmAesGcmEncryptInitResp>()];
 
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmAesGcmEncryptInitReq::ID.0,
             req_bytes,
             resp_bytes,
-        )
-        .await?;
+        )?;
 
         let init_resp = CmAesGcmEncryptInitResp::ref_from_bytes(resp_bytes)
             .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -103,7 +102,7 @@ impl AesGcm {
     /// # Returns
     /// * `Ok(())` - If the initialization was successful.
     /// * `Err(CaliptraApiError)` - If there was an error during initialization.
-    pub async fn spdm_crypt_init(
+    pub fn spdm_crypt_init(
         &mut self,
         cmk: Cmk,
         spdm_version: u8,
@@ -134,13 +133,12 @@ impl AesGcm {
 
             let resp_bytes = &mut [0u8; size_of::<CmAesGcmSpdmEncryptInitResp>()];
 
-            execute_mailbox_cmd(
+            execute_mailbox_cmd_sync(
                 &mailbox,
                 CmAesGcmSpdmEncryptInitReq::ID.0,
                 req.as_mut_bytes(),
                 resp_bytes,
-            )
-            .await?;
+            )?;
 
             let init_resp = CmAesGcmSpdmEncryptInitResp::ref_from_bytes(resp_bytes)
                 .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -160,13 +158,12 @@ impl AesGcm {
 
             let resp_bytes = &mut [0u8; size_of::<CmAesGcmSpdmDecryptInitResp>()];
 
-            execute_mailbox_cmd(
+            execute_mailbox_cmd_sync(
                 &mailbox,
                 CmAesGcmSpdmDecryptInitReq::ID.0,
                 req.as_mut_bytes(),
                 resp_bytes,
-            )
-            .await?;
+            )?;
 
             let init_resp = CmAesGcmSpdmDecryptInitResp::ref_from_bytes(resp_bytes)
                 .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -188,7 +185,7 @@ impl AesGcm {
     /// # Returns
     /// * `Ok(usize)` - The size of the encrypted data.
     /// * `Err(CaliptraApiError)` - on failure.
-    pub async fn encrypt_update(
+    pub fn encrypt_update(
         &mut self,
         plaintext: &[u8],
         ciphertext: &mut [u8],
@@ -218,13 +215,12 @@ impl AesGcm {
 
         let resp_bytes = &mut [0u8; size_of::<CmAesGcmEncryptUpdateResp>()];
 
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmAesGcmEncryptUpdateReq::ID.0,
             req.as_mut_bytes(),
             resp_bytes,
-        )
-        .await?;
+        )?;
 
         let update_resp = CmAesGcmEncryptUpdateResp::ref_from_bytes(resp_bytes)
             .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -255,7 +251,7 @@ impl AesGcm {
     ///
     /// # Note
     /// This method resets the context after completion.
-    pub async fn encrypt_final(
+    pub fn encrypt_final(
         &mut self,
         plaintext: &[u8],
         ciphertext: &mut [u8],
@@ -282,13 +278,12 @@ impl AesGcm {
 
         let resp_bytes = &mut [0u8; size_of::<CmAesGcmEncryptFinalResp>()];
 
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmAesGcmEncryptFinalReq::ID.0,
             req.as_mut_bytes(),
             resp_bytes,
-        )
-        .await?;
+        )?;
 
         let final_resp = CmAesGcmEncryptFinalResp::ref_from_bytes(resp_bytes)
             .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -314,7 +309,7 @@ impl AesGcm {
     ///
     /// # Returns
     /// * Aes256GcmIv on success or error
-    pub async fn decrypt_init(
+    pub fn decrypt_init(
         &mut self,
         cmk: Cmk,
         iv: Aes256GcmIv,
@@ -340,13 +335,12 @@ impl AesGcm {
 
         let resp_bytes = &mut [0u8; size_of::<CmAesGcmDecryptInitResp>()];
 
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmAesGcmDecryptInitReq::ID.0,
             req_bytes,
             resp_bytes,
-        )
-        .await?;
+        )?;
 
         let init_resp = CmAesGcmDecryptInitResp::ref_from_bytes(resp_bytes)
             .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -366,7 +360,7 @@ impl AesGcm {
     /// # Returns
     /// * `Ok(())` - If the decryption was successful and `plaintext` is filled with the decrypted data.
     /// * `Err(CaliptraApiError)` - on failure.
-    pub async fn decrypt_update(
+    pub fn decrypt_update(
         &mut self,
         ciphertext: &[u8],
         plaintext: &mut [u8],
@@ -394,13 +388,12 @@ impl AesGcm {
 
         let resp_bytes = &mut [0u8; size_of::<CmAesGcmDecryptUpdateResp>()];
 
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmAesGcmDecryptUpdateReq::ID.0,
             req.as_mut_bytes(),
             resp_bytes,
-        )
-        .await?;
+        )?;
 
         let update_resp = CmAesGcmDecryptUpdateResp::ref_from_bytes(resp_bytes)
             .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -427,7 +420,7 @@ impl AesGcm {
     /// # Note
     /// This method resets the context after completion. Tag verification is handled
     /// internally by the hardware during the decrypt operations.
-    pub async fn decrypt_final(
+    pub fn decrypt_final(
         &mut self,
         tag: Aes256GcmTag,
         ciphertext: &[u8],
@@ -454,13 +447,12 @@ impl AesGcm {
 
         let resp_bytes = &mut [0u8; size_of::<CmAesGcmDecryptFinalResp>()];
 
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmAesGcmDecryptFinalReq::ID.0,
             req.as_mut_bytes(),
             resp_bytes,
-        )
-        .await?;
+        )?;
 
         let final_resp = CmAesGcmDecryptFinalResp::ref_from_bytes(resp_bytes)
             .map_err(|_| CaliptraApiError::InvalidResponse)?;
@@ -491,7 +483,7 @@ impl AesGcm {
     /// # Returns
     /// * `Ok((usize, Aes256GcmIv, Aes256GcmTag))` - Total bytes encrypted, IV, and authentication tag
     /// * `Err(CaliptraApiError)` - on failure
-    pub async fn encrypt(
+    pub fn encrypt(
         &mut self,
         cmk: Cmk,
         aad: &[u8],
@@ -502,7 +494,7 @@ impl AesGcm {
             return Err(CaliptraApiError::AesGcmInvalidDataLength);
         }
 
-        let iv = self.encrypt_init(cmk, aad).await?;
+        let iv = self.encrypt_init(cmk, aad)?;
         let chunk_size = MAX_CMB_DATA_SIZE;
         let mut total_encrypted = 0;
 
@@ -514,7 +506,7 @@ impl AesGcm {
             let chunk = &plaintext[start..end];
             let cipher_chunk = &mut ciphertext[total_encrypted..];
 
-            let encrypted_size = self.encrypt_update(chunk, cipher_chunk).await?;
+            let encrypted_size = self.encrypt_update(chunk, cipher_chunk)?;
             total_encrypted += encrypted_size;
         }
 
@@ -524,12 +516,12 @@ impl AesGcm {
             let last_chunk = &plaintext[remaining_start..];
             let final_cipher_chunk = &mut ciphertext[total_encrypted..];
 
-            let (final_size, tag) = self.encrypt_final(last_chunk, final_cipher_chunk).await?;
+            let (final_size, tag) = self.encrypt_final(last_chunk, final_cipher_chunk)?;
             total_encrypted += final_size;
             tag
         } else {
             // No remaining data, call final with empty chunks
-            let (_final_size, tag) = self.encrypt_final(&[], &mut []).await?;
+            let (_final_size, tag) = self.encrypt_final(&[], &mut [])?;
             tag
         };
 
@@ -553,7 +545,7 @@ impl AesGcm {
     /// # Note
     /// This method resets the context after completion. Tag verification is handled
     /// internally by the hardware during the decrypt operations.
-    pub async fn decrypt(
+    pub fn decrypt(
         &mut self,
         cmk: Cmk,
         iv: Aes256GcmIv,
@@ -566,7 +558,7 @@ impl AesGcm {
             return Err(CaliptraApiError::AesGcmInvalidDataLength);
         }
 
-        let _iv = self.decrypt_init(cmk, iv, aad).await?;
+        let _iv = self.decrypt_init(cmk, iv, aad)?;
         let chunk_size = MAX_CMB_DATA_SIZE;
         let mut total_decrypted = 0;
 
@@ -578,7 +570,7 @@ impl AesGcm {
             let chunk = &ciphertext[start..end];
             let plain_chunk = &mut plaintext[total_decrypted..];
 
-            let decrypted_size = self.decrypt_update(chunk, plain_chunk).await?;
+            let decrypted_size = self.decrypt_update(chunk, plain_chunk)?;
             total_decrypted += decrypted_size;
         }
 
@@ -588,13 +580,11 @@ impl AesGcm {
             let last_chunk = &ciphertext[remaining_start..];
             let final_plain_chunk = &mut plaintext[total_decrypted..];
 
-            let final_size = self
-                .decrypt_final(tag, last_chunk, final_plain_chunk)
-                .await?;
+            let final_size = self.decrypt_final(tag, last_chunk, final_plain_chunk)?;
             total_decrypted += final_size;
         } else {
             // No remaining data, call final with empty chunks
-            let final_size = self.decrypt_final(tag, &[], &mut []).await?;
+            let final_size = self.decrypt_final(tag, &[], &mut [])?;
             total_decrypted += final_size;
         }
 
@@ -617,7 +607,7 @@ impl AesGcm {
     /// * `Ok((usize, Aes256GcmTag))` - Total bytes encrypted and authentication tag
     /// * `Err(CaliptraApiError)` - on failure
     #[allow(clippy::too_many_arguments)]
-    pub async fn spdm_message_encrypt(
+    pub fn spdm_message_encrypt(
         &mut self,
         cmk: Cmk,
         spdm_version: u8,
@@ -632,8 +622,7 @@ impl AesGcm {
         }
 
         // Initialize SPDM encryption context
-        self.spdm_crypt_init(cmk, spdm_version, seq_number, seq_number_le, aad, true)
-            .await?;
+        self.spdm_crypt_init(cmk, spdm_version, seq_number, seq_number_le, aad, true)?;
 
         let chunk_size = MAX_CMB_DATA_SIZE;
         let mut total_encrypted = 0;
@@ -646,7 +635,7 @@ impl AesGcm {
             let chunk = &plaintext[start..end];
             let cipher_chunk = &mut ciphertext[total_encrypted..];
 
-            let encrypted_size = self.encrypt_update(chunk, cipher_chunk).await?;
+            let encrypted_size = self.encrypt_update(chunk, cipher_chunk)?;
             total_encrypted += encrypted_size;
         }
 
@@ -656,12 +645,12 @@ impl AesGcm {
             let last_chunk = &plaintext[remaining_start..];
             let final_cipher_chunk = &mut ciphertext[total_encrypted..];
 
-            let (final_size, tag) = self.encrypt_final(last_chunk, final_cipher_chunk).await?;
+            let (final_size, tag) = self.encrypt_final(last_chunk, final_cipher_chunk)?;
             total_encrypted += final_size;
             tag
         } else {
             // No remaining data, call final with empty chunks
-            let (_final_size, tag) = self.encrypt_final(&[], &mut []).await?;
+            let (_final_size, tag) = self.encrypt_final(&[], &mut [])?;
             tag
         };
 
@@ -689,7 +678,7 @@ impl AesGcm {
     /// This method resets the context after completion. Tag verification is handled
     /// internally by the hardware during the decrypt operations.
     #[allow(clippy::too_many_arguments)]
-    pub async fn spdm_message_decrypt(
+    pub fn spdm_message_decrypt(
         &mut self,
         cmk: Cmk,
         spdm_version: u8,
@@ -705,8 +694,7 @@ impl AesGcm {
         }
 
         // Initialize SPDM decryption context
-        self.spdm_crypt_init(cmk, spdm_version, seq_number, seq_number_le, aad, false)
-            .await?;
+        self.spdm_crypt_init(cmk, spdm_version, seq_number, seq_number_le, aad, false)?;
 
         let chunk_size = MAX_CMB_DATA_SIZE;
         let mut total_decrypted = 0;
@@ -719,7 +707,7 @@ impl AesGcm {
             let chunk = &ciphertext[start..end];
             let plain_chunk = &mut plaintext[total_decrypted..];
 
-            let decrypted_size = self.decrypt_update(chunk, plain_chunk).await?;
+            let decrypted_size = self.decrypt_update(chunk, plain_chunk)?;
             total_decrypted += decrypted_size;
         }
 
@@ -729,13 +717,11 @@ impl AesGcm {
             let last_chunk = &ciphertext[remaining_start..];
             let final_plain_chunk = &mut plaintext[total_decrypted..];
 
-            let final_size = self
-                .decrypt_final(tag, last_chunk, final_plain_chunk)
-                .await?;
+            let final_size = self.decrypt_final(tag, last_chunk, final_plain_chunk)?;
             total_decrypted += final_size;
         } else {
             // No remaining data, call final with empty chunks
-            let final_size = self.decrypt_final(tag, &[], &mut []).await?;
+            let final_size = self.decrypt_final(tag, &[], &mut [])?;
             total_decrypted += final_size;
         }
 

@@ -1,7 +1,7 @@
 // Licensed under the Apache-2.0 license
 
 use crate::error::{CaliptraApiError, CaliptraApiResult};
-use crate::mailbox_api::execute_mailbox_cmd;
+use crate::mailbox_api::execute_mailbox_cmd_sync;
 use caliptra_api::mailbox::{
     CommandId, FipsVersionResp, FwInfoResp, GetImageInfoReq, GetImageInfoResp, MailboxReqHeader,
 };
@@ -12,20 +12,19 @@ use zerocopy::{FromBytes, IntoBytes};
 pub struct DeviceState;
 
 impl DeviceState {
-    pub async fn fw_info() -> CaliptraApiResult<FwInfoResp> {
+    pub fn fw_info() -> CaliptraApiResult<FwInfoResp> {
         let mailbox = Mailbox::new();
         let mut req = MailboxReqHeader::default();
         let req_bytes = req.as_mut_bytes();
 
         let mut rsp_bytes = [0u8; size_of::<FwInfoResp>()];
 
-        let size = execute_mailbox_cmd(
+        let size = execute_mailbox_cmd_sync(
             &mailbox,
             u32::from(CommandId::FW_INFO),
             req_bytes,
             &mut rsp_bytes,
-        )
-        .await?;
+        )?;
         if size != size_of::<FwInfoResp>() {
             return Err(CaliptraApiError::InvalidResponse);
         }
@@ -36,7 +35,7 @@ impl DeviceState {
         Ok(resp)
     }
 
-    pub async fn image_info(image_id: u32) -> CaliptraApiResult<GetImageInfoResp> {
+    pub fn image_info(image_id: u32) -> CaliptraApiResult<GetImageInfoResp> {
         let mailbox = Mailbox::new();
         let mut req = GetImageInfoReq {
             hdr: MailboxReqHeader::default(),
@@ -46,13 +45,12 @@ impl DeviceState {
 
         let mut resp_bytes = [0u8; size_of::<GetImageInfoResp>()];
 
-        let size = execute_mailbox_cmd(
+        let size = execute_mailbox_cmd_sync(
             &mailbox,
             u32::from(CommandId::GET_IMAGE_INFO),
             req_bytes,
             &mut resp_bytes,
-        )
-        .await?;
+        )?;
 
         if size != size_of::<GetImageInfoResp>() {
             return Err(CaliptraApiError::InvalidResponse);
@@ -64,20 +62,19 @@ impl DeviceState {
         Ok(resp)
     }
 
-    pub async fn fw_version() -> CaliptraApiResult<(u32, u32, u32, u32)> {
+    pub fn fw_version() -> CaliptraApiResult<(u32, u32, u32, u32)> {
         let mailbox = Mailbox::new();
         let mut req = MailboxReqHeader::default();
         let req_bytes = req.as_mut_bytes();
 
         let mut rsp_bytes = [0u8; size_of::<FipsVersionResp>()];
 
-        let size = execute_mailbox_cmd(
+        let size = execute_mailbox_cmd_sync(
             &mailbox,
             u32::from(CommandId::VERSION),
             req_bytes,
             &mut rsp_bytes,
-        )
-        .await?;
+        )?;
         if size != size_of::<FipsVersionResp>() {
             return Err(CaliptraApiError::InvalidResponse);
         }

@@ -163,3 +163,19 @@ pub async fn execute_mailbox_cmd(
         Err(e) => Err(CaliptraApiError::Mailbox(e))?,
     }
 }
+
+pub fn execute_mailbox_cmd_sync(
+    mailbox: &Mailbox,
+    cmd: u32,
+    req_bytes: &mut [u8],
+    resp_bytes: &mut [u8],
+) -> CaliptraApiResult<usize> {
+    mailbox
+        .populate_checksum(cmd, req_bytes)
+        .map_err(CaliptraApiError::Syscall)?;
+    match mailbox.execute_sync(cmd, req_bytes, resp_bytes) {
+        Ok(size) => Ok(size),
+        Err(MailboxError::ErrorCode(ErrorCode::Busy)) => Err(CaliptraApiError::MailboxBusy)?,
+        Err(e) => Err(CaliptraApiError::Mailbox(e))?,
+    }
+}

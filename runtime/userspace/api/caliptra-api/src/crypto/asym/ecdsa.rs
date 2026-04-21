@@ -3,7 +3,7 @@
 use crate::crypto::asym::{ECC_P384_PARAM_X_SIZE, ECC_P384_PARAM_Y_SIZE, ECC_P384_SIGNATURE_SIZE};
 use crate::crypto::hash::SHA384_HASH_SIZE;
 use crate::error::CaliptraApiResult;
-use crate::mailbox_api::execute_mailbox_cmd;
+use crate::mailbox_api::execute_mailbox_cmd_sync;
 use caliptra_api::mailbox::{EcdsaVerifyReq, MailboxReqHeader, MailboxRespHeader, Request};
 use caliptra_mcu_libsyscall_caliptra::mailbox::Mailbox;
 use zerocopy::IntoBytes;
@@ -11,7 +11,7 @@ use zerocopy::IntoBytes;
 pub struct Ecdsa;
 
 impl Ecdsa {
-    pub async fn ecdsa_verify(
+    pub fn ecdsa_verify(
         pub_key_x: [u8; ECC_P384_PARAM_X_SIZE],
         pub_key_y: [u8; ECC_P384_PARAM_Y_SIZE],
         signature: &[u8; ECC_P384_SIGNATURE_SIZE],
@@ -35,13 +35,12 @@ impl Ecdsa {
 
         let mut rsp = MailboxRespHeader::default();
         let rsp_bytes = rsp.as_mut_bytes();
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             EcdsaVerifyReq::ID.0,
             req.as_mut_bytes(),
             rsp_bytes,
-        )
-        .await?;
+        )?;
         Ok(())
     }
 }

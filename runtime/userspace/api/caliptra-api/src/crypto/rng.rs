@@ -2,7 +2,7 @@
 
 use crate::error::{CaliptraApiError, CaliptraApiResult};
 use crate::mailbox_api::{
-    execute_mailbox_cmd, RandomGenerateResp, RandomStirReq, MAX_RANDOM_NUM_SIZE,
+    execute_mailbox_cmd_sync, RandomGenerateResp, RandomStirReq, MAX_RANDOM_NUM_SIZE,
     MAX_RANDOM_STIR_SIZE,
 };
 use caliptra_api::mailbox::{
@@ -16,7 +16,7 @@ use zerocopy::{FromBytes, IntoBytes};
 pub struct Rng;
 
 impl Rng {
-    pub async fn generate_random_number(random_number: &mut [u8]) -> CaliptraApiResult<()> {
+    pub fn generate_random_number(random_number: &mut [u8]) -> CaliptraApiResult<()> {
         if random_number.len() > MAX_RANDOM_NUM_SIZE {
             return Err(CaliptraApiError::InvalidArgument("Invalid size"));
         }
@@ -30,13 +30,12 @@ impl Rng {
 
         let mut rand_gen_rsp = RandomGenerateResp::default();
         let rsp_bytes = rand_gen_rsp.as_mut_bytes();
-        execute_mailbox_cmd(
+        execute_mailbox_cmd_sync(
             &mailbox,
             CmRandomGenerateReq::ID.0,
             rand_gen_req.as_mut_bytes(),
             rsp_bytes,
-        )
-        .await?;
+        )?;
 
         const VAR_HEADER_SIZE: usize = size_of::<MailboxRespHeaderVarSize>();
         let hdr = MailboxRespHeaderVarSize::read_from_bytes(&rsp_bytes[..VAR_HEADER_SIZE])
@@ -49,7 +48,7 @@ impl Rng {
         Ok(())
     }
 
-    pub async fn add_random_stir(random_stir: &[u8]) -> CaliptraApiResult<()> {
+    pub fn add_random_stir(random_stir: &[u8]) -> CaliptraApiResult<()> {
         if random_stir.len() > MAX_RANDOM_STIR_SIZE {
             return Err(CaliptraApiError::InvalidArgument("Invalid size"));
         }
@@ -65,7 +64,7 @@ impl Rng {
 
         let req_bytes = rand_stir_req.as_mut_bytes();
         let mut rsp_bytes = [0u8; size_of::<MailboxRespHeader>()];
-        execute_mailbox_cmd(&mailbox, CmRandomStirReq::ID.0, req_bytes, &mut rsp_bytes).await?;
+        execute_mailbox_cmd_sync(&mailbox, CmRandomStirReq::ID.0, req_bytes, &mut rsp_bytes)?;
         Ok(())
     }
 }
