@@ -33,7 +33,7 @@ impl CommonCodec for GetDigestsRespCommon {}
 
 fn encode_cert_chain_digest(
     slot_id: u8,
-    cert_store: &dyn SpdmCertStore,
+    cert_store: &mut dyn SpdmCertStore,
     asym_algo: AsymAlgo,
     rsp: &mut MessageBuf<'_>,
 ) -> CommandResult<usize> {

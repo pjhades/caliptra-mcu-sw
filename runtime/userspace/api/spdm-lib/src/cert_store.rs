@@ -51,7 +51,7 @@ pub trait SpdmCertStore {
     ///
     /// # Returns
     /// * `usize` - The length of the certificate chain in bytes or error.
-    fn cert_chain_len(&self, asym_algo: AsymAlgo, slot_id: u8) -> CertStoreResult<usize>;
+    fn cert_chain_len(&mut self, asym_algo: AsymAlgo, slot_id: u8) -> CertStoreResult<usize>;
 
     /// Get the certificate chain in portion. The certificate chain is in ASN.1 DER-encoded X.509 v3 format.
     /// The type of the certificate chain is indicated by the asym_algo parameter.
@@ -67,7 +67,7 @@ pub trait SpdmCertStore {
     /// If the cert portion size is smaller than the buffer size, the remaining bytes in the buffer will be filled with 0,
     /// indicating the end of the cert chain.
     fn get_cert_chain<'a>(
-        &self,
+        &mut self,
         slot_id: u8,
         asym_algo: AsymAlgo,
         offset: usize,
@@ -176,7 +176,7 @@ pub(crate) fn cert_slot_mask(cert_store: &dyn SpdmCertStore) -> (u8, u8) {
 /// # Returns
 /// * `hash` - The hash of the certificate chain.
 pub(crate) fn spdm_cert_chain_hash(
-    cert_store: &dyn SpdmCertStore,
+    cert_store: &mut dyn SpdmCertStore,
     slot_id: u8,
     asym_algo: AsymAlgo,
     hash: &mut [u8],
@@ -217,7 +217,7 @@ pub(crate) fn spdm_cert_chain_hash(
 }
 
 pub(crate) fn spdm_cert_chain_len(
-    cert_store: &dyn SpdmCertStore,
+    cert_store: &mut dyn SpdmCertStore,
     slot_id: u8,
     asym_algo: AsymAlgo,
 ) -> CertStoreResult<usize> {
@@ -226,7 +226,7 @@ pub(crate) fn spdm_cert_chain_len(
 }
 
 fn spdm_cert_chain_hdr(
-    cert_store: &dyn SpdmCertStore,
+    cert_store: &mut dyn SpdmCertStore,
     slot_id: u8,
     asym_algo: AsymAlgo,
 ) -> CertStoreResult<SpdmCertChainHeader> {
@@ -245,7 +245,7 @@ fn spdm_cert_chain_hdr(
 }
 
 pub(crate) fn spdm_read_cert_chain(
-    cert_store: &dyn SpdmCertStore,
+    cert_store: &mut dyn SpdmCertStore,
     slot_id: u8,
     asym_algo: AsymAlgo,
     offset: usize,

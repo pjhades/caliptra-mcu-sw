@@ -36,7 +36,7 @@ pub struct SpdmContext<'a> {
     pub(crate) shared_transcript: Transcript,
     pub(crate) local_capabilities: DeviceCapabilities,
     pub(crate) local_algorithms: LocalDeviceAlgorithms<'a>,
-    pub(crate) device_certs_store: &'a dyn SpdmCertStore,
+    pub(crate) device_certs_store: &'a mut dyn SpdmCertStore,
     pub(crate) measurements: SpdmMeasurements<'a>,
     pub(crate) large_resp_context: LargeResponseCtx,
     pub(crate) session_mgr: SessionManager,
@@ -51,7 +51,7 @@ impl<'a> SpdmContext<'a> {
         spdm_transport: &'a mut dyn SpdmTransportSync,
         local_capabilities: DeviceCapabilities,
         local_algorithms: LocalDeviceAlgorithms<'a>,
-        device_certs_store: &'a dyn SpdmCertStore,
+        device_certs_store: &'a mut dyn SpdmCertStore,
         measurements: SpdmMeasurements<'a>,
         vdm_handlers: Option<&'a mut [&'a mut dyn VdmHandler]>,
     ) -> SpdmResult<Self> {

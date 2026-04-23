@@ -6,17 +6,12 @@
 
 use core::fmt::Write;
 
-use caliptra_mcu_libtockasync::TockExecutor;
-#[allow(unused)]
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-#[allow(unused)]
-use embassy_sync::{lazy_lock::LazyLock, signal::Signal};
 #[cfg(any(
     feature = "test-firmware-update-streaming",
     feature = "test-firmware-update-flash"
 ))]
 mod firmware_update;
-mod image_loader;
+//mod image_loader;
 mod mcu_mbox;
 mod soc_env;
 mod spdm;
@@ -44,8 +39,6 @@ fn print_to_console(buf: &str) {
     }
 }
 
-pub static EXECUTOR: LazyLock<TockExecutor> = LazyLock::new(TockExecutor::new);
-
 #[cfg(not(target_arch = "riscv32"))]
 pub(crate) fn kernel() -> caliptra_mcu_libtock_unittest::fake::Kernel {
     use caliptra_mcu_libtock_unittest::fake;
@@ -67,54 +60,45 @@ fn main() {
     caliptra_mcu_libtockasync::start_async(start());
 }
 
-#[embassy_executor::task]
-async fn start() {
+fn start() {
     unsafe {
         #[allow(static_mut_refs)]
         caliptra_mcu_romtime::set_printer(&mut EMULATOR_WRITER);
     }
-    async_main().await;
+    async_main();
 }
 
-pub(crate) async fn async_main() {
+pub(crate) fn async_main() {
     // TODO: Debug spawning the SPDM task causes a hardfault in FPGA when firmware update is enabled
     // for now, disable the SPDM task if either FW update test is enabled
     #[cfg(not(any(
         feature = "test-firmware-update-streaming",
         feature = "test-firmware-update-flash"
     )))]
-    EXECUTOR
-        .get()
-        .spawner()
-        .spawn(spdm::spdm_task(EXECUTOR.get().spawner()))
-        .unwrap();
+    spdm::spdm_task();
 
-    EXECUTOR
-        .get()
-        .spawner()
-        .spawn(image_loader::image_loading_task())
-        .unwrap();
+    //EXECUTOR
+    //    .get()
+    //    .spawner()
+    //    .spawn(image_loader::image_loading_task())
+    //    .unwrap();
 
-    EXECUTOR
-        .get()
-        .spawner()
-        .spawn(mcu_mbox::mcu_mbox_task())
-        .unwrap();
+    //EXECUTOR
+    //    .get()
+    //    .spawner()
+    //    .spawn(mcu_mbox::mcu_mbox_task())
+    //    .unwrap();
 
-    #[cfg(feature = "test-mcu-mbox-fips-periodic")]
-    EXECUTOR
-        .get()
-        .spawner()
-        .spawn(caliptra_mcu_mbox_lib::fips_periodic::fips_periodic_task())
-        .unwrap();
+    //#[cfg(feature = "test-mcu-mbox-fips-periodic")]
+    //EXECUTOR
+    //    .get()
+    //    .spawner()
+    //    .spawn(caliptra_mcu_mbox_lib::fips_periodic::fips_periodic_task())
+    //    .unwrap();
 
-    #[cfg(any(
-        feature = "test-mctp-vdm-cmds",
-        feature = "test-caliptra-util-host-mctp-vdm-validator"
-    ))]
-    EXECUTOR.get().spawner().spawn(vdm::vdm_task()).unwrap();
-
-    loop {
-        EXECUTOR.get().poll();
-    }
+    //#[cfg(any(
+    //    feature = "test-mctp-vdm-cmds",
+    //    feature = "test-caliptra-util-host-mctp-vdm-validator"
+    //))]
+    //EXECUTOR.get().spawner().spawn(vdm::vdm_task()).unwrap();
 }

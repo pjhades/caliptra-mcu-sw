@@ -124,7 +124,7 @@ impl CertificateResponse {
     pub fn get_chunk(
         &self,
         shared_transcript: &mut Transcript,
-        cert_store: &dyn SpdmCertStore,
+        cert_store: &mut dyn SpdmCertStore,
         cert_rsp_offset: usize,
         chunk: &mut [u8],
     ) -> CommandResult<usize> {
