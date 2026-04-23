@@ -70,10 +70,10 @@ impl MctpTransport {
 }
 
 impl SpdmTransportSync for MctpTransport {
-    fn send_request<'a>(
+    fn send_request(
         &mut self,
         dest_eid: u8,
-        req: &mut MessageBuf<'a>,
+        req: &mut MessageBuf<'_>,
         _secure: Option<bool>,
     ) -> TransportResult<()> {
         let msg_type = self
@@ -97,7 +97,7 @@ impl SpdmTransportSync for MctpTransport {
         Ok(())
     }
 
-    fn receive_response<'a>(&mut self, rsp: &mut MessageBuf<'a>) -> TransportResult<bool> {
+    fn receive_response(&mut self, rsp: &mut MessageBuf<'_>) -> TransportResult<bool> {
         rsp.reset();
 
         let max_len = rsp.capacity();
@@ -137,7 +137,7 @@ impl SpdmTransportSync for MctpTransport {
         Ok(false)
     }
 
-    fn receive_request<'a>(&mut self, req: &mut MessageBuf<'a>) -> TransportResult<bool> {
+    fn receive_request(&mut self, req: &mut MessageBuf<'_>) -> TransportResult<bool> {
         req.reset();
 
         let max_len = req.capacity();
@@ -174,11 +174,7 @@ impl SpdmTransportSync for MctpTransport {
         Ok(false)
     }
 
-    fn send_response<'a>(
-        &mut self,
-        resp: &mut MessageBuf<'a>,
-        _secure: bool,
-    ) -> TransportResult<()> {
+    fn send_response(&mut self, resp: &mut MessageBuf<'_>, _secure: bool) -> TransportResult<()> {
         let msg_type = self
             .mctp
             .msg_type()

@@ -117,10 +117,9 @@ impl<S: Syscalls> Mctp<S> {
 
             S::command(self.driver_num, command::RECEIVE_REQUEST, 0, 0)
                 .to_result::<(), ErrorCode>()
-                .map_err(|err| {
+                .inspect_err(|_| {
                     // Cancel the subscription if the command fails
                     sub.as_mut().cancel();
-                    err
                 })?;
 
             sub.poll()
@@ -207,10 +206,9 @@ impl<S: Syscalls> Mctp<S> {
                 (info.tag & 0x7) as u32,
             )
             .to_result::<(), ErrorCode>()
-            .map_err(|err| {
+            .inspect_err(|_| {
                 // Cancel the subscribe_finish if the command fails
                 sub.as_mut().cancel();
-                err
             })?;
 
             sub.poll()
@@ -297,10 +295,9 @@ impl<S: Syscalls> Mctp<S> {
 
             S::command(self.driver_num, command::SEND_REQUEST, dest_eid as u32, 0)
                 .to_result::<(), ErrorCode>()
-                .map_err(|err| {
+                .inspect_err(|_| {
                     // Cancel the subscription if the command fails
                     sub.as_mut().cancel();
-                    err
                 })?;
 
             sub.poll()
@@ -397,10 +394,9 @@ impl<S: Syscalls> Mctp<S> {
                 tag as u32,
             )
             .to_result::<(), ErrorCode>()
-            .map_err(|err| {
+            .inspect_err(|_| {
                 // Cancel the subscription if the command fails
                 sub.as_mut().cancel();
-                err
             })?;
 
             sub.poll()

@@ -148,12 +148,11 @@ impl<S: Syscalls> Mailbox<S> {
             // Issue the command to the kernel
             S::command(self.driver_num, mailbox_cmd::EXECUTE_COMMAND, command, 0)
                 .to_result::<(), ErrorCode>()
-                .map_err(|err| {
+                .inspect_err(|_| {
                     S::unallow_ro(self.driver_num, mailbox_ro_buffer::INPUT);
                     S::unallow_rw(self.driver_num, mailbox_rw_buffer::RESPONSE);
                     // If command returned error immediately, cancel the subscription
                     sub.as_mut().cancel();
-                    err
                 })?;
 
             sub.poll()

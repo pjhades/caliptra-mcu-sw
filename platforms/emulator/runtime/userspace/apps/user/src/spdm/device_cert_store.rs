@@ -71,22 +71,22 @@ impl SpdmCertStore for SharedCertStore {
         self.cert_store.cert_chain_len(asym_algo, slot_id)
     }
 
-    fn get_cert_chain<'a>(
+    fn get_cert_chain(
         &mut self,
         slot_id: u8,
         asym_algo: AsymAlgo,
         offset: usize,
-        cert_portion: &'a mut [u8],
+        cert_portion: &mut [u8],
     ) -> CertStoreResult<usize> {
         self.cert_store
             .get_cert_chain(slot_id, asym_algo, offset, cert_portion)
     }
 
-    fn root_cert_hash<'a>(
+    fn root_cert_hash(
         &self,
         slot_id: u8,
         asym_algo: AsymAlgo,
-        cert_hash: &'a mut [u8; SHA384_HASH_SIZE],
+        cert_hash: &mut [u8; SHA384_HASH_SIZE],
     ) -> CertStoreResult<()> {
         self.cert_store
             .root_cert_hash(slot_id, asym_algo, cert_hash)

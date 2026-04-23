@@ -57,7 +57,7 @@ fn main() {
     // build a fake kernel so that the app will at least start without Tock
     let _kernel = kernel();
     // call the main function
-    caliptra_mcu_libtockasync::start_async(start());
+    start();
 }
 
 fn start() {
@@ -65,10 +65,10 @@ fn start() {
         #[allow(static_mut_refs)]
         caliptra_mcu_romtime::set_printer(&mut EMULATOR_WRITER);
     }
-    async_main();
+    main_fn();
 }
 
-pub(crate) fn async_main() {
+pub(crate) fn main_fn() {
     // TODO: Debug spawning the SPDM task causes a hardfault in FPGA when firmware update is enabled
     // for now, disable the SPDM task if either FW update test is enabled
     #[cfg(not(any(

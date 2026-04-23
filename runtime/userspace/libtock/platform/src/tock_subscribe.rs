@@ -28,6 +28,12 @@ pin_project! {
     }
 }
 
+impl<S: Syscalls> Default for TockSubscribe<S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<S: Syscalls> TockSubscribe<S> {
     pub fn new() -> TockSubscribe<S> {
         TockSubscribe {
