@@ -295,7 +295,11 @@ impl<S: Syscalls> TockSubscribe<S> {
     /// Block on the upcall until it returns a result.
     pub fn poll(self: Pin<&mut Self>) -> Result<(u32, u32, u32), ErrorCode> {
         loop {
-            match self.result.get() {
+            // Safety: we are doing volatile read here to make sure the compiler doesn't read
+            // self.result just once and store it in a register. In that case, even if the upcall
+            // updates the result we cannot detect it so that the userspace process will be blocked
+            // forever.
+            match unsafe { core::ptr::read_volatile(self.result.as_ptr()) } {
                 Some(tuple) => return Ok(tuple),
                 None => S::yield_wait(),
             }
