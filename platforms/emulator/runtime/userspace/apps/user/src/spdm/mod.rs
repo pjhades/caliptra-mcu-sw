@@ -67,8 +67,10 @@ pub(crate) fn spdm_task() {
     //}
 }
 
+static mut SPDM_RESPONDER_BUFFER: [u8; MAX_SPDM_RESPONDER_BUF_SIZE] =
+    [0; MAX_SPDM_RESPONDER_BUF_SIZE];
+
 fn spdm_mctp_responder(mut shared_cert_store: SharedCertStore) {
-    let mut raw_buffer = [0; MAX_SPDM_RESPONDER_BUF_SIZE];
     let mut cw = Console::<DefaultSyscalls>::writer();
     let mut mctp_spdm_transport: MctpTransport = MctpTransport::new(mctp::driver_num::MCTP_SPDM);
 
@@ -111,7 +113,7 @@ fn spdm_mctp_responder(mut shared_cert_store: SharedCertStore) {
         }
     };
 
-    let mut msg_buffer = MessageBuf::new(&mut raw_buffer);
+    let mut msg_buffer = MessageBuf::new(unsafe { &mut SPDM_RESPONDER_BUFFER });
     loop {
         let result = ctx.process_message(&mut msg_buffer);
         match result {

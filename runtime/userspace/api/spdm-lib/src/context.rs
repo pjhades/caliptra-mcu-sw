@@ -28,6 +28,8 @@ use core::mem::size_of;
 // Maximum SPDM responder buffer size
 pub const MAX_SPDM_RESPONDER_BUF_SIZE: usize = 1024;
 
+static mut CODEC_BUFFER: [u8; MAX_SPDM_RESPONDER_BUF_SIZE] = [0; MAX_SPDM_RESPONDER_BUF_SIZE];
+
 pub struct SpdmContext<'a> {
     transport: &'a mut dyn SpdmTransportSync,
     pub(crate) supported_versions: &'a [SpdmVersion],
@@ -85,11 +87,12 @@ impl<'a> SpdmContext<'a> {
         self.session_mgr.reset_active_session_id();
 
         if secure {
-            // Create a temporary buffer for decrypted application data
-            let mut app_data = [0u8; MAX_SPDM_RESPONDER_BUF_SIZE];
+            // Safety: The buffer is used only for encryption and decryption and will never be shared.
+            #[allow(static_mut_refs)]
+            let app_data = unsafe { &mut CODEC_BUFFER };
             let app_data_len = self
                 .session_mgr
-                .decode_secure_message(self.transport, msg_buf, &mut app_data)
+                .decode_secure_message(self.transport, msg_buf, app_data)
                 .map_err(SpdmError::Session)?;
 
             // Replace msg_buf contents with the decrypted application data
@@ -170,8 +173,10 @@ impl<'a> SpdmContext<'a> {
 
     fn send_response(&mut self, resp: &mut MessageBuf<'a>, secure: bool) -> SpdmResult<()> {
         if secure {
-            let mut secure_message = [0u8; MAX_SPDM_RESPONDER_BUF_SIZE];
-            let mut secure_message_buf = MessageBuf::new(&mut secure_message);
+            // Safety: The buffer is used only for encryption and decryption and will never be shared.
+            #[allow(static_mut_refs)]
+            let secure_message = unsafe { &mut CODEC_BUFFER };
+            let mut secure_message_buf = MessageBuf::new(secure_message);
             let app_data_len = resp.data_len();
             let app_data = resp.data(app_data_len).map_err(SpdmError::Codec)?;
 

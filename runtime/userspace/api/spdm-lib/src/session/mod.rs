@@ -19,6 +19,9 @@ pub(crate) use key_schedule::{KeySchedule, KeyScheduleError, SessionKeyType};
 pub const MAX_NUM_SESSIONS: usize = 1;
 const MAX_SPDM_AEAD_ASSOCIATED_DATA_SIZE: usize = 16; // Size of the associated data for AEAD
 
+static mut PLAINTEXT_DATA: [u8; MAX_SPDM_RESPONDER_BUF_SIZE] = [0; MAX_SPDM_RESPONDER_BUF_SIZE];
+static mut ENCRYPTED_DATA: [u8; MAX_SPDM_RESPONDER_BUF_SIZE] = [0; MAX_SPDM_RESPONDER_BUF_SIZE];
+
 #[derive(Debug, PartialEq)]
 pub enum SessionError {
     SessionsLimitReached,
@@ -172,8 +175,11 @@ impl SessionManager {
             todo!("Handle sequence number if exists and process");
         }
 
-        let mut encrypted_data = [0u8; MAX_SPDM_RESPONDER_BUF_SIZE];
-        let mut plaintext_data = [0u8; MAX_SPDM_RESPONDER_BUF_SIZE];
+        // Safety: The buffers are used only for encryption and decryption and will never be shared.
+        #[allow(static_mut_refs)]
+        let encrypted_data = unsafe { &mut ENCRYPTED_DATA };
+        #[allow(static_mut_refs)]
+        let plaintext_data = unsafe { &mut PLAINTEXT_DATA };
         // copy app_data_length + app_data + random data to encrypt using aead.
         let app_data_len = app_data_buffer.len() as u16;
         plaintext_data[..2].copy_from_slice(&app_data_len.to_le_bytes());
@@ -193,7 +199,7 @@ impl SessionManager {
         let (encrypted_size, tag) = session_info.encrypt_secure_message(
             associated_data,
             &plaintext_data[..encrypted_len],
-            &mut encrypted_data,
+            encrypted_data,
         )?;
 
         let mut secure_message_len = session_id
@@ -235,7 +241,9 @@ impl SessionManager {
     ) -> SessionResult<usize> {
         let mut aead_data = [0u8; MAX_SPDM_AEAD_ASSOCIATED_DATA_SIZE];
         let mut aead_buf = MessageBuf::new(&mut aead_data);
-        let mut plaintext_buffer = [0u8; MAX_SPDM_RESPONDER_BUF_SIZE];
+        // Safety: The buffer is used only for encryption and decryption and will never be shared.
+        #[allow(static_mut_refs)]
+        let plaintext_data = unsafe { &mut PLAINTEXT_DATA };
         // Decode u32 session id first
         let session_id = u32::decode(secure_message).map_err(SessionError::Codec)?;
 
@@ -280,11 +288,11 @@ impl SessionManager {
         let decrypted_size = session_info.decrypt_secure_message(
             associated_data,
             encrypted_data,
-            &mut plaintext_buffer,
+            plaintext_data,
             tag,
         )?;
 
-        let mut plaintext_msg = MessageBuf::from(&mut plaintext_buffer[..decrypted_size]);
+        let mut plaintext_msg = MessageBuf::from(&mut plaintext_data[..decrypted_size]);
 
         let app_data_len = u16::decode(&mut plaintext_msg).map_err(SessionError::Codec)? as usize;
         let app_data = plaintext_msg
