@@ -16,6 +16,7 @@ use embassy_sync::{lazy_lock::LazyLock, signal::Signal};
     feature = "test-firmware-update-flash"
 ))]
 mod firmware_update;
+mod heap_monitor;
 mod image_loader;
 mod mcu_mbox;
 mod soc_env;
@@ -99,6 +100,12 @@ pub(crate) async fn async_main() {
         .get()
         .spawner()
         .spawn(mcu_mbox::mcu_mbox_task())
+        .unwrap();
+
+    EXECUTOR
+        .get()
+        .spawner()
+        .spawn(heap_monitor::heap_monitor_task())
         .unwrap();
 
     #[cfg(feature = "test-mcu-mbox-fips-periodic")]
